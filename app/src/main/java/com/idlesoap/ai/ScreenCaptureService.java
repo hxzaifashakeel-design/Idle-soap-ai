@@ -1,5 +1,13 @@
 package com.idlesoap.ai;
 
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions; 
+
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+
 import android.app.Service;
 import android.app.PendingIntent;
 import android.app.Notification;
@@ -53,6 +61,9 @@ public class ScreenCaptureService extends Service {
     private int screenWidth;
     private int screenHeight;
     private long lastSavedTime = 0;
+    private TextRecognizer textRecognizer;
+private volatile boolean ocrInProgress = false;
+private long lastOcrTime = 0;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -193,6 +204,9 @@ public class ScreenCaptureService extends Service {
 
         handlerThread.start();
         imageHandler = new Handler(handlerThread.getLooper());
+        textRecognizer =
+        TextRecognition.getClient(
+                TextRecognizerOptions.DEFAULT_OPTIONS);
 
         imageReader = ImageReader.newInstance(
                 screenWidth,
@@ -286,6 +300,18 @@ public class ScreenCaptureService extends Service {
             }
 
             lastSavedTime = now;
+            if (textRecognizer != null &&
+        !ocrInProgress &&
+        now - lastOcrTime >= 2000) {
+
+    Bitmap ocrFrame =
+            cropped.copy(Bitmap.Config.ARGB_8888, false);
+
+    if (ocrFrame != null) {
+        lastOcrTime = now;
+        runTextRecognition(ocrFrame);
+    }
+            }
 
         } catch (Exception e) {
             Log.e("IdleSoapAI", "Frame save failed", e);
@@ -305,7 +331,73 @@ public class ScreenCaptureService extends Service {
             }
         }
     }
+private void runTextRecognition(Bitmap frame) {
 
+    if (textRecognizer == null || ocrInProgress) {
+        frame.recycle();
+        return;
+    }
+
+    ocrInProgress = true;
+
+    try {
+        InputImage input =
+                InputImage.fromBitmap(frame, 0);
+
+        textRecognizer.process(input)
+                .addOnSuccessListener(result -> {
+                    saveOcrResult(result.getText());
+                })
+                .addOnFailureListener(error -> {
+                    Log.e("IdleSoapAI", "OCR failed", error);
+                    saveOcrResult(
+                            "OCR error: " + error.getMessage());
+                })
+                .addOnCompleteListener(task -> {
+                    ocrInProgress = false;
+
+                    if (!frame.isRecycled()) {
+                        frame.recycle();
+                    }
+                });
+
+    } catch (Exception e) {
+        ocrInProgress = false;
+
+        if (!frame.isRecycled()) {
+            frame.recycle();
+        }
+
+        Log.e("IdleSoapAI", "OCR processing error", e);
+        saveOcrResult("OCR error: " + e.getMessage());
+    }
+}
+
+private void saveOcrResult(String recognizedText) {
+
+    File output = new File(
+            getCacheDir(), "latest_ocr.txt");
+
+    try (FileOutputStream stream =
+                 new FileOutputStream(output);
+
+         OutputStreamWriter writer =
+                 new OutputStreamWriter(
+                         stream, StandardCharsets.UTF_8)) {
+
+        if (recognizedText == null ||
+                recognizedText.trim().isEmpty()) {
+            writer.write("No text detected yet.");
+        } else {
+            writer.write(recognizedText);
+        }
+
+        writer.flush();
+
+    } catch (Exception e) {
+        Log.e("IdleSoapAI", "Could not save OCR result", e);
+    }
+}
     @Override
     public void onDestroy() {
 
@@ -329,6 +421,10 @@ public class ScreenCaptureService extends Service {
             handlerThread = null;
         }
 stopForeground(true);
+        if (textRecognizer != null) {
+    textRecognizer.close();
+    textRecognizer = null;
+        }
         super.onDestroy();
     }
 
