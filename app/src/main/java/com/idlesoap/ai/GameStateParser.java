@@ -6,21 +6,16 @@ import java.util.regex.Pattern;
 public final class GameStateParser {
 
     private static final Pattern MONEY =
-            Pattern.compile(
-                    "(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
+            Pattern.compile("(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
 
     private static final Pattern LEVEL =
-        Pattern.compile(
-                "(?i)^\\s*l(?:v|y|1)[l1i]?\\s*(\\d{1,3})\\b.*$");
+            Pattern.compile("(?i)^\\s*l(?:v|y|1)[l1i]?\\s*(\\d{1,3})\\b.*$");
+
     private static final Pattern PERCENT =
             Pattern.compile("(\\d{1,3})\\s*%");
 
     private static final Pattern PROGRESS =
             Pattern.compile("(\\d{1,4})\\s*/\\s*(\\d{1,4})");
-
-    private static final Pattern EARNINGS =
-            Pattern.compile(
-                    "(?i).*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*/\\s*sec.*");
 
     private GameStateParser() {
     }
@@ -48,48 +43,21 @@ public final class GameStateParser {
         StringBuilder result = new StringBuilder();
 
         result.append("CURRENT GAME STATE\n\n");
-
-        result.append("Money: ")
-                .append(money)
-                .append("\n");
-
-        result.append("Earnings: ")
-                .append(earnings)
-                .append("\n");
-
-        result.append("Current soap: ")
-                .append(soap)
-                .append("\n");
-
-        result.append("Soap completion: ")
-                .append(percent)
-                .append("\n");
-
-        result.append("Cutting progress: ")
-                .append(progress)
-                .append("\n\n");
+        result.append("Money: ").append(money).append("\n");
+        result.append("Earnings: ").append(earnings).append("\n");
+        result.append("Current soap: ").append(soap).append("\n");
+        result.append("Soap completion: ").append(percent).append("\n");
+        result.append("Cutting progress: ").append(progress).append("\n\n");
 
         result.append("UPGRADES\n\n");
+        result.append("Cut: ").append(cut).append("\n");
+        result.append("Income: ").append(income).append("\n");
+        result.append("Speed: ").append(speed).append("\n\n");
 
-        result.append("Cut: ")
-                .append(cut)
-                .append("\n");
-
-        result.append("Income: ")
-                .append(income)
-                .append("\n");
-
-        result.append("Speed: ")
-                .append(speed)
-                .append("\n\n");
-
-        result.append("FREE BOOSTS\n")
-                .append(boosts)
-                .append("\n\n");
+        result.append("FREE BOOSTS\n").append(boosts).append("\n\n");
 
         result.append(
-                "Note: Uncertain OCR readings are not used " +
-                "as confirmed game values.");
+                "Note: Uncertain OCR readings are not used as confirmed game values.");
 
         return result.toString();
     }
@@ -117,6 +85,7 @@ public final class GameStateParser {
                     .matcher(lines[i]);
 
             if (matcher.find()) {
+
                 soapNumber = "#" + matcher.group(1);
 
                 if (i + 2 < lines.length) {
@@ -136,12 +105,10 @@ public final class GameStateParser {
 
         for (String line : lines) {
 
-            Matcher matcher =
-                    PROGRESS.matcher(line);
+            Matcher matcher = PROGRESS.matcher(line);
 
             if (matcher.find()) {
-                return matcher.group(1) +
-                        "/" + matcher.group(2);
+                return matcher.group(1) + "/" + matcher.group(2);
             }
         }
 
@@ -152,10 +119,10 @@ public final class GameStateParser {
 
         for (String line : lines) {
 
-            Matcher matcher =
-                    PERCENT.matcher(line);
+            Matcher matcher = PERCENT.matcher(line);
 
             if (matcher.find()) {
+
                 int value = Integer.parseInt(matcher.group(1));
 
                 if (value <= 100) {
@@ -169,98 +136,49 @@ public final class GameStateParser {
 
     private static String findEarnings(String[] lines) {
 
-    for (String line : lines) {
+        for (String line : lines) {
 
-        String compact = line.toUpperCase()
-                .replaceAll("\\s+", "");
+            String compact = line.toUpperCase()
+                    .replaceAll("\\s+", "");
 
-        if (!compact.contains("SEC")) {
-            continue;
-        }
+            if (!compact.contains("SEC")) {
+                continue;
+            }
 
-        // OCR sometimes reads the slash as I, J or |
-        compact = compact.replaceAll(
-                "(?<=[KMB])[JI|](?=SEC)", "/");
+            compact = compact.replaceAll(
+                    "(?<=[KMB])[JI|](?=SEC)", "/");
 
-        // Confirmed game-specific OCR correction
-        if (compact.contains("L97K/SEC")) {
-            return "1.97K/sec (OCR corrected)";
-        }
+            if (compact.contains("L97K/SEC")) {
+                return "1.97K/sec (OCR corrected)";
+            }
 
-        String value = compact.replaceFirst("^[^0-9]*", "");
+            String value =
+                    compact.replaceFirst("^[^0-9]*", "");
 
-        // Do not assume a missing decimal point.
-        if (value.startsWith("197K/SEC")) {
-            return "Uncertain: 197K/sec (decimal may be missing)";
-        }
+            if (value.startsWith("197K/SEC")) {
+                return "Uncertain: 197K/sec (decimal may be missing)";
+            }
 
-        if (value.startsWith("1.97K/SEC")) {
-            return "1.97K/sec";
-        }
+            if (value.startsWith("1.97K/SEC")) {
+                return "1.97K/sec";
+            }
 
-        if (compact.matches(".*[LI|].*")) {
+            if (compact.matches(".*[LI|].*")) {
+                return "Uncertain: " + line.trim();
+            }
+
+            Matcher matcher = Pattern.compile(
+                    "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC.*$")
+                    .matcher(value);
+
+            if (matcher.find()) {
+                return matcher.group(1).replace(',', '.') + "/sec";
+            }
+
             return "Uncertain: " + line.trim();
         }
 
-        Matcher matcher = Pattern.compile(
-                "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC.*$")
-                .matcher(value);
-
-        if (matcher.find()) {
-            return matcher.group(1).replace(',', '.') + "/sec";
-        }
-
-        return "Uncertain: " + line.trim();
-    }
-
-    return "Not detected";
-    private static String findEarnings(String[] lines) {
-
-    for (String line : lines) {
-
-        String compact = line.toUpperCase()
-                .replaceAll("\\s+", "");
-
-        if (!compact.contains("SEC")) {
-            continue;
-        }
-
-        // OCR sometimes reads the slash as I, J or |
-        compact = compact.replaceAll(
-                "(?<=[KMB])[JI|](?=SEC)", "/");
-
-        // Confirmed game-specific OCR correction
-        if (compact.contains("L97K/SEC")) {
-            return "1.97K/sec (OCR corrected)";
-        }
-
-        String value = compact.replaceFirst("^[^0-9]*", "");
-
-        // Do not assume a missing decimal point.
-        if (value.startsWith("197K/SEC")) {
-            return "Uncertain: 197K/sec (decimal may be missing)";
-        }
-
-        if (value.startsWith("1.97K/SEC")) {
-            return "1.97K/sec";
-        }
-
-        if (compact.matches(".*[LI|].*")) {
-            return "Uncertain: " + line.trim();
-        }
-
-        Matcher matcher = Pattern.compile(
-                "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC.*$")
-                .matcher(value);
-
-        if (matcher.find()) {
-            return matcher.group(1).replace(',', '.') + "/sec";
-        }
-
-        return "Uncertain: " + line.trim();
-    }
-
-    return "Not detected";
+        return "Not detected";
     }
 
     private static String findUpgrade(
@@ -281,8 +199,7 @@ public final class GameStateParser {
 
             for (int j = Math.max(0, i - 3); j < i; j++) {
 
-                Matcher matcher =
-                        LEVEL.matcher(lines[j]);
+                Matcher matcher = LEVEL.matcher(lines[j]);
 
                 if (matcher.find()) {
                     level = matcher.group(1);
@@ -325,4 +242,4 @@ public final class GameStateParser {
                 ? "None detected"
                 : boosts.toString();
     }
-              }
+}
