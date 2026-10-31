@@ -328,7 +328,7 @@ public class ScreenCaptureService extends Service {
             handlerThread.quitSafely();
             handlerThread = null;
         }
-
+stopForeground(true);
         super.onDestroy();
     }
 
