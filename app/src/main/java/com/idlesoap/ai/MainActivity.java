@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
 
     private TextView status;
     private TextView recognizedText;
+    private TextView gameStateText;
     private ImageView preview;
 
     private Bitmap currentBitmap;
@@ -135,6 +136,25 @@ private String latestRecognizedText =
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView gameStateTitle = new TextView(this);
+gameStateTitle.setText("DETECTED GAME STATE");
+gameStateTitle.setTextColor(0xFFFFFFFF);
+gameStateTitle.setTextSize(18);
+gameStateTitle.setPadding(0, dp(24), 0, dp(10));
+layout.addView(gameStateTitle);
+
+gameStateText = new TextView(this);
+gameStateText.setText("Waiting for game information...");
+gameStateText.setTextColor(0xFFFFFFFF);
+gameStateText.setTextSize(15);
+gameStateText.setPadding(dp(12), dp(12), dp(12), dp(12));
+gameStateText.setBackgroundColor(0xFF252B38);
+
+layout.addView(
+        gameStateText,
+        new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout controls = new LinearLayout(this);
 controls.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -166,6 +186,9 @@ freezeButton.setOnClickListener(v -> {
     } else {
         freezeButton.setText("FREEZE TEXT");
         recognizedText.setText(latestRecognizedText);
+        gameStateText.setText(
+        GameStateParser.createSummary(latestRecognizedText));
+        
         status.setText("Live recognition resumed.");
     }
 });
@@ -303,6 +326,8 @@ copyButton.setOnClickListener(v -> {
 
         if (!displayFrozen) {
             recognizedText.setText(latestRecognizedText);
+            gameStateText.setText(
+        GameStateParser.createSummary(latestRecognizedText));
         }
 
         lastOcrModified = modified;
