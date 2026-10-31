@@ -17,36 +17,33 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
 
     private static final int SCREEN_CAPTURE_REQUEST = 1001;
 
     private TextView status;
+    private TextView recognizedText;
     private ImageView preview;
+
+    private Bitmap currentBitmap;
+
     private Handler handler = new Handler();
-    private long lastModified = 0;
+
+    private long lastScreenModified = -1;
+    private long lastScreenLength = -1;
+    private long lastOcrModified = -1;
 
     private final Runnable previewUpdater = new Runnable() {
         @Override
         public void run() {
-            File file = new File(
-                    getCacheDir(), "latest_screen.jpg");
-
-            if (file.exists() &&
-                    file.lastModified() != lastModified) {
-
-                Bitmap bitmap =
-                        BitmapFactory.decodeFile(file.getAbsolutePath());
-
-                if (bitmap != null) {
-                    preview.setImageBitmap(bitmap);
-                    lastModified = file.lastModified();
-                    status.setText(
-                            "Capture active. Latest screen frame received.");
-                }
-            }
+            updateScreenPreview();
+            updateRecognizedText();
 
             handler.postDelayed(this, 1000);
         }
@@ -58,8 +55,7 @@ public class MainActivity extends Activity {
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setGravity(Gravity.CENTER_HORIZONTAL);
-        layout.setPadding(24, 32, 24, 24);
+        layout.setPadding(dp(20), dp(24), dp(20), dp(24));
         layout.setBackgroundColor(0xFF141823);
 
         TextView title = new TextView(this);
@@ -74,7 +70,7 @@ public class MainActivity extends Activity {
         subtitle.setTextSize(15);
         subtitle.setTextColor(0xFFBBBBBB);
         subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, 12, 0, 20);
+        subtitle.setPadding(0, dp(10), 0, dp(18));
         layout.addView(subtitle);
 
         status = new TextView(this);
@@ -82,7 +78,7 @@ public class MainActivity extends Activity {
         status.setTextSize(16);
         status.setTextColor(0xFFFFFFFF);
         status.setGravity(Gravity.CENTER);
-        status.setPadding(0, 12, 0, 20);
+        status.setPadding(0, dp(12), 0, dp(16));
         layout.addView(status);
 
         Button startButton = new Button(this);
@@ -96,8 +92,8 @@ public class MainActivity extends Activity {
         TextView previewTitle = new TextView(this);
         previewTitle.setText("LATEST CAPTURED FRAME");
         previewTitle.setTextColor(0xFFFFFFFF);
-        previewTitle.setTextSize(16);
-        previewTitle.setPadding(0, 24, 0, 12);
+        previewTitle.setTextSize(17);
+        previewTitle.setPadding(0, dp(24), 0, dp(10));
         layout.addView(previewTitle);
 
         preview = new ImageView(this);
@@ -107,11 +103,43 @@ public class MainActivity extends Activity {
 
         LinearLayout.LayoutParams imageParams =
                 new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, 600);
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(260));
 
         layout.addView(preview, imageParams);
 
+        TextView ocrTitle = new TextView(this);
+        ocrTitle.setText("WHAT THE AI CAN READ");
+        ocrTitle.setTextColor(0xFFFFFFFF);
+        ocrTitle.setTextSize(17);
+        ocrTitle.setPadding(0, dp(24), 0, dp(10));
+        layout.addView(ocrTitle);
+
+        recognizedText = new TextView(this);
+        recognizedText.setText("Waiting for screen recognition...");
+        recognizedText.setTextColor(0xFFFFFFFF);
+        recognizedText.setTextSize(14);
+        recognizedText.setTextIsSelectable(true);
+        recognizedText.setPadding(dp(12), dp(12), dp(12), dp(12));
+        recognizedText.setBackgroundColor(0xFF252B38);
+
+        layout.addView(
+                recognizedText,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+
         startButton.setOnClickListener(v -> {
+
+            File oldOcr =
+                    new File(getCacheDir(), "latest_ocr.txt");
+
+            oldOcr.delete();
+
+            lastOcrModified = -1;
+
+            status.setText("Waiting for Android permission...");
+
             MediaProjectionManager manager =
                     (MediaProjectionManager)
                     getSystemService(Context.MEDIA_PROJECTION_SERVICE);
@@ -125,8 +153,12 @@ public class MainActivity extends Activity {
         });
 
         stopButton.setOnClickListener(v -> {
+
             Intent stopIntent =
                     new Intent(this, ScreenCaptureService.class);
+
+            stopIntent.setAction(
+                    ScreenCaptureService.ACTION_STOP);
 
             stopService(stopIntent);
 
@@ -136,6 +168,92 @@ public class MainActivity extends Activity {
         ScrollView scrollView = new ScrollView(this);
         scrollView.addView(layout);
         setContentView(scrollView);
+
+        handler.post(previewUpdater);
+    }
+
+    private void updateScreenPreview() {
+
+        File file =
+                new File(getCacheDir(), "latest_screen.jpg");
+
+        if (!file.exists()) {
+            return;
+        }
+
+        long modified = file.lastModified();
+        long length = file.length();
+
+        if (modified != lastScreenModified ||
+                length != lastScreenLength) {
+
+            Bitmap bitmap =
+                    BitmapFactory.decodeFile(file.getAbsolutePath());
+
+            if (bitmap != null) {
+
+                Bitmap oldBitmap = currentBitmap;
+
+                currentBitmap = bitmap;
+                preview.setImageBitmap(bitmap);
+
+                if (oldBitmap != null &&
+                        !oldBitmap.isRecycled()) {
+                    oldBitmap.recycle();
+                }
+
+                lastScreenModified = modified;
+                lastScreenLength = length;
+            }
+        }
+    }
+
+    private void updateRecognizedText() {
+
+        File file =
+                new File(getCacheDir(), "latest_ocr.txt");
+
+        if (!file.exists()) {
+            return;
+        }
+
+        long modified = file.lastModified();
+
+        if (modified == lastOcrModified) {
+            return;
+        }
+
+        StringBuilder result = new StringBuilder();
+
+        try (BufferedReader reader =
+                     new BufferedReader(
+                             new InputStreamReader(
+                                     new FileInputStream(file),
+                                     StandardCharsets.UTF_8))) {
+
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                result.append(line).append('\n');
+            }
+
+            recognizedText.setText(
+                    result.length() == 0
+                            ? "No text detected yet."
+                            : result.toString());
+
+            lastOcrModified = modified;
+
+        } catch (Exception e) {
+
+            status.setText(
+                    "Could not read OCR result: " + e.getMessage());
+        }
+    }
+
+    private int dp(int value) {
+        return (int) (value *
+                getResources().getDisplayMetrics().density + 0.5f);
     }
 
     @Override
@@ -166,6 +284,7 @@ public class MainActivity extends Activity {
                         data);
 
                 try {
+
                     if (Build.VERSION.SDK_INT >= 26) {
                         startForegroundService(serviceIntent);
                     } else {
@@ -173,18 +292,20 @@ public class MainActivity extends Activity {
                     }
 
                     status.setText(
-                            "Permission granted. Starting capture...");
+                            "Capture started. Waiting for OCR...");
 
-                    lastModified = 0;
                     handler.removeCallbacks(previewUpdater);
                     handler.post(previewUpdater);
 
                 } catch (Exception e) {
+
                     status.setText(
-                            "Could not start capture: " + e.getMessage());
+                            "Could not start capture: " +
+                                    e.getMessage());
                 }
 
             } else {
+
                 status.setText(
                         "Screen capture permission was not granted.");
             }
@@ -193,7 +314,15 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+
         handler.removeCallbacks(previewUpdater);
+
+        if (currentBitmap != null &&
+                !currentBitmap.isRecycled()) {
+            currentBitmap.recycle();
+            currentBitmap = null;
+        }
+
         super.onDestroy();
     }
-            }
+}
