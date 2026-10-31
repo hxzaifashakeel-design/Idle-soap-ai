@@ -1,6 +1,7 @@
 package com.idlesoap.ai;
 
 import android.app.Service;
+import android.app.PendingIntent;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -108,46 +109,62 @@ public class ScreenCaptureService extends Service {
 
     private void startCaptureNotification() {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-            NotificationChannel channel =
-                    new NotificationChannel(
-                            CHANNEL_ID,
-                            "Screen Capture",
-                            NotificationManager.IMPORTANCE_LOW);
+        NotificationChannel channel =
+                new NotificationChannel(
+                        CHANNEL_ID,
+                        "Screen Capture",
+                        NotificationManager.IMPORTANCE_LOW);
 
-            NotificationManager manager =
-                    getSystemService(NotificationManager.class);
+        NotificationManager manager =
+                getSystemService(NotificationManager.class);
 
-            manager.createNotificationChannel(channel);
-        }
+        manager.createNotificationChannel(channel);
+    }
 
-        Notification notification;
+    Intent stopIntent =
+            new Intent(this, ScreenCaptureService.class);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            notification = new Notification.Builder(this, CHANNEL_ID)
-                    .setContentTitle("Idle Soap AI")
-                    .setContentText("Screen capture is active")
-                    .setSmallIcon(android.R.drawable.ic_menu_camera)
-                    .setOngoing(true)
-                    .build();
-        } else {
-            notification = new Notification.Builder(this)
-                    .setContentTitle("Idle Soap AI")
-                    .setContentText("Screen capture is active")
-                    .setSmallIcon(android.R.drawable.ic_menu_camera)
-                    .setOngoing(true)
-                    .build();
-        }
+    stopIntent.setAction(ACTION_STOP);
 
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
-        }
+    int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+
+    if (Build.VERSION.SDK_INT >= 23) {
+        flags |= PendingIntent.FLAG_IMMUTABLE;
+    }
+
+    PendingIntent stopPendingIntent =
+            PendingIntent.getService(
+                    this, 102, stopIntent, flags);
+
+    Notification.Builder builder;
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        builder = new Notification.Builder(this, CHANNEL_ID);
+    } else {
+        builder = new Notification.Builder(this);
+    }
+
+    Notification notification = builder
+            .setContentTitle("Idle Soap AI")
+            .setContentText("Screen capture is active")
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setOngoing(true)
+            .addAction(
+                    android.R.drawable.ic_media_pause,
+                    "Stop capture",
+                    stopPendingIntent)
+            .build();
+
+    if (Build.VERSION.SDK_INT >= 29) {
+        startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+    } else {
+        startForeground(NOTIFICATION_ID, notification);
+    }
     }
 
     private void startScreenCapture() {
