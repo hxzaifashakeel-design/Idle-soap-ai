@@ -1,5 +1,8 @@
 package com.idlesoap.ai;
 
+import android.content.ClipboardManager;
+import android.content.ClipData;
+import android.widget.Toast;
 import android.app.Activity;
 import android.os.Bundle;
 import android.os.Build;
@@ -32,6 +35,10 @@ public class MainActivity extends Activity {
     private ImageView preview;
 
     private Bitmap currentBitmap;
+    private boolean displayFrozen = false;
+
+private String latestRecognizedText =
+        "Waiting for screen recognition...";
 
     private Handler handler = new Handler();
 
@@ -128,6 +135,58 @@ public class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout controls = new LinearLayout(this);
+controls.setOrientation(LinearLayout.HORIZONTAL);
+
+Button freezeButton = new Button(this);
+freezeButton.setText("FREEZE TEXT");
+
+Button copyButton = new Button(this);
+copyButton.setText("COPY TEXT");
+
+LinearLayout.LayoutParams buttonParams =
+        new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f);
+
+controls.addView(freezeButton, buttonParams);
+controls.addView(copyButton, buttonParams);
+
+layout.addView(controls);
+
+freezeButton.setOnClickListener(v -> {
+
+    displayFrozen = !displayFrozen;
+
+    if (displayFrozen) {
+        freezeButton.setText("RESUME LIVE");
+        status.setText(
+                "Display frozen. OCR continues running.");
+    } else {
+        freezeButton.setText("FREEZE TEXT");
+        recognizedText.setText(latestRecognizedText);
+        status.setText("Live recognition resumed.");
+    }
+});
+
+copyButton.setOnClickListener(v -> {
+
+    String text = recognizedText.getText().toString();
+
+    ClipboardManager clipboard =
+            (ClipboardManager)
+            getSystemService(CLIPBOARD_SERVICE);
+
+    clipboard.setPrimaryClip(
+            ClipData.newPlainText("Idle Soap AI OCR", text));
+
+    Toast.makeText(
+            this,
+            "Recognition text copied!",
+            Toast.LENGTH_SHORT).show();
+});
+        
 
         startButton.setOnClickListener(v -> {
 
@@ -210,45 +269,49 @@ public class MainActivity extends Activity {
 
     private void updateRecognizedText() {
 
-        File file =
-                new File(getCacheDir(), "latest_ocr.txt");
+    File file =
+            new File(getCacheDir(), "latest_ocr.txt");
 
-        if (!file.exists()) {
-            return;
+    if (!file.exists()) {
+        return;
+    }
+
+    long modified = file.lastModified();
+
+    if (modified == lastOcrModified) {
+        return;
+    }
+
+    StringBuilder result = new StringBuilder();
+
+    try (BufferedReader reader =
+                 new BufferedReader(
+                         new InputStreamReader(
+                                 new FileInputStream(file),
+                                 StandardCharsets.UTF_8))) {
+
+        String line;
+
+        while ((line = reader.readLine()) != null) {
+            result.append(line).append('\n');
         }
 
-        long modified = file.lastModified();
+        latestRecognizedText =
+                result.length() == 0
+                        ? "No text detected yet."
+                        : result.toString();
 
-        if (modified == lastOcrModified) {
-            return;
+        if (!displayFrozen) {
+            recognizedText.setText(latestRecognizedText);
         }
 
-        StringBuilder result = new StringBuilder();
+        lastOcrModified = modified;
 
-        try (BufferedReader reader =
-                     new BufferedReader(
-                             new InputStreamReader(
-                                     new FileInputStream(file),
-                                     StandardCharsets.UTF_8))) {
+    } catch (Exception e) {
 
-            String line;
-
-            while ((line = reader.readLine()) != null) {
-                result.append(line).append('\n');
-            }
-
-            recognizedText.setText(
-                    result.length() == 0
-                            ? "No text detected yet."
-                            : result.toString());
-
-            lastOcrModified = modified;
-
-        } catch (Exception e) {
-
-            status.setText(
-                    "Could not read OCR result: " + e.getMessage());
-        }
+        status.setText(
+                "Could not read OCR result: " + e.getMessage());
+    }
     }
 
     private int dp(int value) {
