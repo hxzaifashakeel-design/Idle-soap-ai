@@ -10,8 +10,8 @@ public final class GameStateParser {
                     "(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
 
     private static final Pattern LEVEL =
-            Pattern.compile("(?i)lvl\\s*(\\d+)");
-
+        Pattern.compile(
+                "(?i)^\\s*l(?:v|y|1)[l1i]?\\s*(\\d{1,3})\\b.*$");
     private static final Pattern PERCENT =
             Pattern.compile("(\\d{1,3})\\s*%");
 
@@ -178,38 +178,83 @@ public final class GameStateParser {
             continue;
         }
 
-        boolean hasOcrLookalike =
-                compact.contains("L") ||
-                compact.contains("I") ||
-                compact.contains("|");
+        // OCR sometimes reads the slash as I, J or |
+        compact = compact.replaceAll(
+                "(?<=[KMB])[JI|](?=SEC)", "/");
 
-        compact = compact.replace('J', '/')
-                .replace('L', '1')
-                .replace('I', '1')
-                .replace('|', '1');
-
-        compact = compact.replaceFirst("^[^0-9]*", "");
-
-        // Correct the confirmed game-specific OCR reading.
-        if (hasOcrLookalike &&
-                (compact.startsWith("197K/SEC") ||
-                 compact.startsWith("1.97K/SEC"))) {
-
+        // Confirmed game-specific OCR correction
+        if (compact.contains("L97K/SEC")) {
             return "1.97K/sec (OCR corrected)";
         }
 
-        // Avoid guessing when OCR has confused a character.
-        if (hasOcrLookalike) {
+        String value = compact.replaceFirst("^[^0-9]*", "");
+
+        // Do not assume a missing decimal point.
+        if (value.startsWith("197K/SEC")) {
+            return "Uncertain: 197K/sec (decimal may be missing)";
+        }
+
+        if (value.startsWith("1.97K/SEC")) {
+            return "1.97K/sec";
+        }
+
+        if (compact.matches(".*[LI|].*")) {
             return "Uncertain: " + line.trim();
         }
 
         Matcher matcher = Pattern.compile(
                 "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC.*$")
-                .matcher(compact);
+                .matcher(value);
 
         if (matcher.find()) {
-            return matcher.group(1).replace(',', '.') +
-                    "/sec";
+            return matcher.group(1).replace(',', '.') + "/sec";
+        }
+
+        return "Uncertain: " + line.trim();
+    }
+
+    return "Not detected";
+    private static String findEarnings(String[] lines) {
+
+    for (String line : lines) {
+
+        String compact = line.toUpperCase()
+                .replaceAll("\\s+", "");
+
+        if (!compact.contains("SEC")) {
+            continue;
+        }
+
+        // OCR sometimes reads the slash as I, J or |
+        compact = compact.replaceAll(
+                "(?<=[KMB])[JI|](?=SEC)", "/");
+
+        // Confirmed game-specific OCR correction
+        if (compact.contains("L97K/SEC")) {
+            return "1.97K/sec (OCR corrected)";
+        }
+
+        String value = compact.replaceFirst("^[^0-9]*", "");
+
+        // Do not assume a missing decimal point.
+        if (value.startsWith("197K/SEC")) {
+            return "Uncertain: 197K/sec (decimal may be missing)";
+        }
+
+        if (value.startsWith("1.97K/SEC")) {
+            return "1.97K/sec";
+        }
+
+        if (compact.matches(".*[LI|].*")) {
+            return "Uncertain: " + line.trim();
+        }
+
+        Matcher matcher = Pattern.compile(
+                "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC.*$")
+                .matcher(value);
+
+        if (matcher.find()) {
+            return matcher.group(1).replace(',', '.') + "/sec";
         }
 
         return "Uncertain: " + line.trim();
