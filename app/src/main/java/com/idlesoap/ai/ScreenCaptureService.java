@@ -78,8 +78,8 @@ public class ScreenCaptureService extends Service {
                     0.01f, 0.03f, 0.24f, 0.08f),
 
             new OcrRegion(
-                    "EARNINGS",
-                    0.01f, 0.085f, 0.24f, 0.12f),
+        "EARNINGS",
+        0.01f, 0.078f, 0.24f, 0.12f),
 
             new OcrRegion(
                     "SOAP STATUS",
@@ -90,24 +90,24 @@ public class ScreenCaptureService extends Service {
                     0.40f, 0.16f, 0.60f, 0.205f),
 
             new OcrRegion(
-                    "BOOSTS",
-                    0.005f, 0.245f, 0.15f, 0.55f),
+        "BOOSTS",
+        0.005f, 0.23f, 0.15f, 0.50f),
 
             new OcrRegion(
-                    "CUTTING PROGRESS",
-                    0.29f, 0.60f, 0.70f, 0.705f),
+        "CUTTING PROGRESS",
+        0.29f, 0.575f, 0.70f, 0.64f),
 
             new OcrRegion(
-                    "CUT UPGRADE",
-                    0.18f, 0.675f, 0.38f, 0.86f),
+        "CUT UPGRADE",
+        0.18f, 0.64f, 0.38f, 0.79f),
 
             new OcrRegion(
-                    "INCOME UPGRADE",
-                    0.40f, 0.675f, 0.60f, 0.86f),
+        "INCOME UPGRADE",
+        0.40f, 0.64f, 0.60f, 0.79f),
 
             new OcrRegion(
-                    "SPEED UPGRADE",
-                    0.62f, 0.675f, 0.82f, 0.86f)
+        "SPEED UPGRADE",
+        0.62f, 0.64f, 0.82f, 0.79f),
     };
 
     private MediaProjection projection;
