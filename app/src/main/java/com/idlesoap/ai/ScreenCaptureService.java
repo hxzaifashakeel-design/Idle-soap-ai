@@ -412,67 +412,7 @@ public class ScreenCaptureService extends Service {
         }
     }
 
-    private void processNextRegion(
-            Bitmap source,
-            int regionIndex,
-            StringBuilder snapshot) {
-
-        if (regionIndex >= OCR_REGIONS.length) {
-
-            saveOcrResult(snapshot.toString());
-
-            ocrInProgress = false;
-
-            if (!source.isRecycled()) {
-                source.recycle();
-            }
-
-            return;
-        }
-
-        OcrRegion region = OCR_REGIONS[regionIndex];
-
-        Bitmap rawCrop = null;
-        Bitmap enlarged = null;
-
-        try {
-
-            int left = Math.max(
-                    0,
-                    Math.min(
-                            source.getWidth() - 1,
-                            Math.round(source.getWidth() * region.left)));
-
-            int top = Math.max(
-                    0,
-                    Math.min(
-                            source.getHeight() - 1,
-                            Math.round(source.getHeight() * region.top)));
-
-            int right = Math.max(
-                    left + 1,
-                    Math.min(
-                            source.getWidth(),
-                            Math.round(source.getWidth() * region.right)));
-
-            int bottom = Math.max(
-                    top + 1,
-                    Math.min(
-                            source.getHeight(),
-                            Math.round(source.getHeight() * region.bottom)));
-
-            rawCrop = Bitmap.createBitmap(
-                    source,
-                    left,
-                    top,
-                    right - left,
-                    bottom - top);
-
-            enlarged = Bitmap.createScaledBitmap(
-                    rawCrop,
-                    rawCrop.getWidth() * UPSCALE_FACTOR,
-                    rawCrop.getHeight() * UPSCALE_FACTOR,
-                    true);
+    
 
 private void processNextRegion(
         Bitmap source,
