@@ -1,15 +1,19 @@
 package com.idlesoap.ai;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class GameStateParser {
 
     private static final Pattern MONEY =
-            Pattern.compile("(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
+            Pattern.compile(
+                    "(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
 
     private static final Pattern LEVEL =
-            Pattern.compile("(?i)^\\s*l(?:v|y|1)[l1i]?\\s*(\\d{1,3})\\b.*$");
+            Pattern.compile(
+                    "(?i)^\\s*(?:lvl|lvi|lvy|ly|lv1|level)\\s*(\\d{1,3})\\s*$");
 
     private static final Pattern PERCENT =
             Pattern.compile("(\\d{1,3})\\s*%");
@@ -26,153 +30,159 @@ public final class GameStateParser {
             return "Waiting for game information...";
         }
 
-        String[] lines = rawText.split("\\R");
+        Map<String, String> sections = splitSections(rawText);
 
-        String money = findFirstMoney(lines);
-        String soap = findSoap(lines);
-        String progress = findProgress(lines);
-        String percent = findPercent(lines);
-        String earnings = findEarnings(lines);
+        String money = findMoney(sections.get("MONEY"));
+        String earnings = findEarnings(sections.get("EARNINGS"));
 
-        String cut = findUpgrade(lines, "cut");
-        String income = findUpgrade(lines, "income");
-        String speed = findUpgrade(lines, "speed");
+        String soapNumber =
+                findSoapNumber(sections.get("SOAP STATUS"));
 
-        String boosts = findBoosts(lines);
+        String soapPercent =
+                findPercent(sections.get("SOAP STATUS"));
+
+        String soapName =
+                firstUsefulLine(sections.get("SOAP NAME"));
+
+        String cuttingSection =
+                sections.get("CUTTING PROGRESS");
+
+        String cuttingLevel = findLevel(cuttingSection);
+        String cuttingProgress = findProgress(cuttingSection);
+
+        String cut = findUpgrade(sections.get("CUT UPGRADE"));
+        String income = findUpgrade(sections.get("INCOME UPGRADE"));
+        String speed = findUpgrade(sections.get("SPEED UPGRADE"));
+
+        String boosts = cleanBoosts(sections.get("BOOSTS"));
 
         StringBuilder result = new StringBuilder();
 
         result.append("CURRENT GAME STATE\n\n");
-        result.append("Money: ").append(money).append("\n");
-        result.append("Earnings: ").append(earnings).append("\n");
-        result.append("Current soap: ").append(soap).append("\n");
-        result.append("Soap completion: ").append(percent).append("\n");
-        result.append("Cutting progress: ").append(progress).append("\n\n");
+
+        result.append("Money: ")
+                .append(money).append("\n");
+
+        result.append("Earnings: ")
+                .append(earnings).append("\n");
+
+        result.append("Current soap: ")
+                .append(soapName)
+                .append(" (")
+                .append(soapNumber)
+                .append(")\n");
+
+        result.append("Soap completion: ")
+                .append(soapPercent).append("\n");
+
+        result.append("Cutting level: ")
+                .append(cuttingLevel).append("\n");
+
+        result.append("Cutting progress: ")
+                .append(cuttingProgress).append("\n\n");
 
         result.append("UPGRADES\n\n");
-        result.append("Cut: ").append(cut).append("\n");
-        result.append("Income: ").append(income).append("\n");
-        result.append("Speed: ").append(speed).append("\n\n");
 
-        result.append("FREE BOOSTS\n").append(boosts).append("\n\n");
+        result.append("Cut: ")
+                .append(cut).append("\n");
+
+        result.append("Income: ")
+                .append(income).append("\n");
+
+        result.append("Speed: ")
+                .append(speed).append("\n\n");
+
+        result.append("FREE BOOSTS\n")
+                .append(boosts).append("\n\n");
 
         result.append(
-                "Note: Uncertain OCR readings are not used as confirmed game values.");
+                "Each value is read from its own screen region. ")
+                .append("Missing or unclear readings remain unconfirmed.");
 
         return result.toString();
     }
 
-    private static String findFirstMoney(String[] lines) {
+    private static Map<String, String> splitSections(
+            String rawText) {
 
-        for (String line : lines) {
-            if (MONEY.matcher(line.trim()).matches()) {
-                return line.trim();
+        Map<String, StringBuilder> builders =
+                new LinkedHashMap<>();
+
+        String current = null;
+
+        for (String line : rawText.split("\\R")) {
+
+            String trimmed = line.trim();
+
+            if (trimmed.matches("^\\[[A-Z ]+\\]$")) {
+
+                current = trimmed.substring(
+                        1, trimmed.length() - 1);
+
+                builders.put(current, new StringBuilder());
+
+            } else if (current != null) {
+
+                builders.get(current)
+                        .append(line)
+                        .append('\n');
+            }
+        }
+
+        Map<String, String> sections =
+                new LinkedHashMap<>();
+
+        for (Map.Entry<String, StringBuilder> entry
+                : builders.entrySet()) {
+
+            sections.put(
+                    entry.getKey(),
+                    entry.getValue().toString().trim());
+        }
+
+        return sections;
+    }
+
+    private static String findMoney(String section) {
+
+        if (section == null) {
+            return "Not detected";
+        }
+
+        for (String line : section.split("\\R")) {
+
+            String value = line.trim();
+
+            if (MONEY.matcher(value).matches()) {
+                return value;
             }
         }
 
         return "Not detected";
     }
 
-    private static String findSoap(String[] lines) {
+    private static String findEarnings(String section) {
 
-        String soapNumber = "Unknown";
-        String soapName = "Unknown";
-
-        for (int i = 0; i < lines.length; i++) {
-
-            Matcher matcher = Pattern.compile(
-                    "(?i)soap\\s*#?\\s*(\\d+)")
-                    .matcher(lines[i]);
-
-            if (matcher.find()) {
-
-                soapNumber = "#" + matcher.group(1);
-
-                if (i + 2 < lines.length) {
-                    soapName = lines[i + 2].trim();
-                } else if (i + 1 < lines.length) {
-                    soapName = lines[i + 1].trim();
-                }
-
-                break;
-            }
+        if (section == null) {
+            return "Not detected";
         }
 
-        return soapName + " (" + soapNumber + ")";
-    }
-
-    private static String findProgress(String[] lines) {
-
-        for (String line : lines) {
-
-            Matcher matcher = PROGRESS.matcher(line);
-
-            if (matcher.find()) {
-                return matcher.group(1) + "/" + matcher.group(2);
-            }
-        }
-
-        return "Not detected";
-    }
-
-    private static String findPercent(String[] lines) {
-
-        for (String line : lines) {
-
-            Matcher matcher = PERCENT.matcher(line);
-
-            if (matcher.find()) {
-
-                int value = Integer.parseInt(matcher.group(1));
-
-                if (value <= 100) {
-                    return value + "%";
-                }
-            }
-        }
-
-        return "Not detected";
-    }
-
-    private static String findEarnings(String[] lines) {
-
-        for (String line : lines) {
+        for (String line : section.split("\\R")) {
 
             String compact = line.toUpperCase()
                     .replaceAll("\\s+", "");
 
-            if (!compact.contains("SEC")) {
-                continue;
-            }
-
             compact = compact.replaceAll(
                     "(?<=[KMB])[JI|](?=SEC)", "/");
 
-            if (compact.contains("L97K/SEC")) {
-                return "1.97K/sec (OCR corrected)";
-            }
-
-            String value =
-                    compact.replaceFirst("^[^0-9]*", "");
-
-            if (value.startsWith("197K/SEC")) {
-                return "Uncertain: 197K/sec (decimal may be missing)";
-            }
-
-            if (value.startsWith("1.97K/SEC")) {
-                return "1.97K/sec";
-            }
-
-            if (compact.matches(".*[LI|].*")) {
-                return "Uncertain: " + line.trim();
-            }
-
             Matcher matcher = Pattern.compile(
-                    "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC.*$")
-                    .matcher(value);
+                    "^(\\d+(?:[.,]\\d+)?[KMB]?)/SEC$")
+                    .matcher(compact);
 
-            if (matcher.find()) {
-                return matcher.group(1).replace(',', '.') + "/sec";
+            if (matcher.matches()) {
+
+                return matcher.group(1)
+                        .replace(',', '.') + "/sec";
             }
 
             return "Uncertain: " + line.trim();
@@ -181,65 +191,146 @@ public final class GameStateParser {
         return "Not detected";
     }
 
-    private static String findUpgrade(
-            String[] lines, String upgradeName) {
+    private static String findSoapNumber(String section) {
 
-        for (int i = 0; i < lines.length; i++) {
+        if (section == null) {
+            return "Unknown";
+        }
 
-            String label = lines[i]
-                    .replaceAll("[^a-zA-Z]", "")
-                    .toLowerCase();
+        Matcher matcher = Pattern.compile(
+                "(?i)soap\\s*#?\\s*(\\d+)")
+                .matcher(section);
 
-            if (!label.equals(upgradeName)) {
-                continue;
+        return matcher.find()
+                ? "#" + matcher.group(1)
+                : "Unknown";
+    }
+
+    private static String findPercent(String section) {
+
+        if (section == null) {
+            return "Not detected";
+        }
+
+        Matcher matcher = PERCENT.matcher(section);
+
+        while (matcher.find()) {
+
+            int value =
+                    Integer.parseInt(matcher.group(1));
+
+            if (value <= 100) {
+                return value + "%";
             }
-
-            String level = "Unknown";
-            String cost = "Unknown";
-
-            for (int j = Math.max(0, i - 3); j < i; j++) {
-
-                Matcher matcher = LEVEL.matcher(lines[j]);
-
-                if (matcher.find()) {
-                    level = matcher.group(1);
-                }
-            }
-
-            for (int j = i + 1;
-                 j < Math.min(lines.length, i + 4);
-                 j++) {
-
-                if (MONEY.matcher(lines[j].trim()).matches()) {
-                    cost = lines[j].trim();
-                    break;
-                }
-            }
-
-            return "Level " + level + " | Cost " + cost;
         }
 
         return "Not detected";
     }
 
-    private static String findBoosts(String[] lines) {
+    private static String findProgress(String section) {
 
-        StringBuilder boosts = new StringBuilder();
+        if (section == null) {
+            return "Not detected";
+        }
 
-        for (int i = 1; i < lines.length; i++) {
+        Matcher matcher = PROGRESS.matcher(section);
 
-            if (lines[i].toLowerCase().contains("free")) {
+        if (matcher.find()) {
 
-                if (boosts.length() > 0) {
-                    boosts.append(", ");
-                }
+            int completed =
+                    Integer.parseInt(matcher.group(1));
 
-                boosts.append(lines[i - 1].trim());
+            int total =
+                    Integer.parseInt(matcher.group(2));
+
+            if (total > 0 && completed <= total) {
+                return completed + "/" + total;
             }
         }
 
-        return boosts.length() == 0
+        return "Not detected";
+    }
+
+    private static String findLevel(String section) {
+
+        if (section == null) {
+            return "Not detected";
+        }
+
+        for (String line : section.split("\\R")) {
+
+            Matcher matcher = LEVEL.matcher(line.trim());
+
+            if (matcher.matches()) {
+                return matcher.group(1);
+            }
+        }
+
+        return "Not detected";
+    }
+
+    private static String findUpgrade(String section) {
+
+        if (section == null) {
+            return "Not detected";
+        }
+
+        String level = findLevel(section);
+        String cost = findMoney(section);
+
+        return "Level " + level + " | Cost " + cost;
+    }
+
+    private static String firstUsefulLine(String section) {
+
+        if (section == null) {
+            return "Unknown";
+        }
+
+        for (String line : section.split("\\R")) {
+
+            String value = line.trim();
+
+            if (!value.isEmpty()
+                    && !value.equalsIgnoreCase("No text detected yet.")
+                    && !value.toLowerCase().contains("recognition error")) {
+
+                return value;
+            }
+        }
+
+        return "Unknown";
+    }
+
+    private static String cleanBoosts(String section) {
+
+        if (section == null) {
+            return "None detected";
+        }
+
+        StringBuilder result = new StringBuilder();
+
+        for (String line : section.split("\\R")) {
+
+            String value = line.trim();
+
+            if (value.isEmpty()
+                    || value.equalsIgnoreCase("Free")
+                    || value.equalsIgnoreCase("No text detected yet.")
+                    || value.equalsIgnoreCase("Recognition error")) {
+
+                continue;
+            }
+
+            if (result.length() > 0) {
+                result.append(", ");
+            }
+
+            result.append(value);
+        }
+
+        return result.length() == 0
                 ? "None detected"
-                : boosts.toString();
+                : result.toString();
     }
 }
