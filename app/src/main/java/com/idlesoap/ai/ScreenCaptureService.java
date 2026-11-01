@@ -73,42 +73,42 @@ public class ScreenCaptureService extends Service {
     // Region positions are based on your supplied gameplay screenshot.
     private static final OcrRegion[] OCR_REGIONS = {
 
-            new OcrRegion(
-                    "MONEY",
-                    0.01f, 0.03f, 0.24f, 0.08f),
+    new OcrRegion(
+            "MONEY",
+            0.005f, 0.025f, 0.195f, 0.065f),
 
-            new OcrRegion(
-        "EARNINGS",
-        0.01f, 0.078f, 0.24f, 0.12f),
+    new OcrRegion(
+            "EARNINGS",
+            0.015f, 0.066f, 0.19f, 0.095f),
 
-            new OcrRegion(
-                    "SOAP STATUS",
-                    0.35f, 0.07f, 0.65f, 0.13f),
+    new OcrRegion(
+            "SOAP STATUS",
+            0.29f, 0.055f, 0.52f, 0.108f),
 
-            new OcrRegion(
-                    "SOAP NAME",
-                    0.40f, 0.16f, 0.60f, 0.205f),
+    new OcrRegion(
+            "SOAP NAME",
+            0.36f, 0.135f, 0.50f, 0.16f),
 
-            new OcrRegion(
-        "BOOSTS",
-        0.005f, 0.23f, 0.15f, 0.50f),
+    new OcrRegion(
+            "BOOSTS",
+            0.005f, 0.195f, 0.13f, 0.44f),
 
-            new OcrRegion(
-        "CUTTING PROGRESS",
-        0.29f, 0.575f, 0.70f, 0.64f),
+    new OcrRegion(
+            "CUTTING PROGRESS",
+            0.24f, 0.51f, 0.56f, 0.565f),
 
-            new OcrRegion(
-        "CUT UPGRADE",
-        0.18f, 0.64f, 0.38f, 0.79f),
+    new OcrRegion(
+            "CUT UPGRADE",
+            0.15f, 0.565f, 0.31f, 0.69f),
 
-            new OcrRegion(
-        "INCOME UPGRADE",
-        0.40f, 0.64f, 0.60f, 0.79f),
+    new OcrRegion(
+            "INCOME UPGRADE",
+            0.325f, 0.565f, 0.48f, 0.69f),
 
-            new OcrRegion(
-        "SPEED UPGRADE",
-        0.62f, 0.64f, 0.82f, 0.79f),
-    };
+    new OcrRegion(
+            "SPEED UPGRADE",
+            0.505f, 0.565f, 0.66f, 0.69f)
+};
 
     private MediaProjection projection;
     private VirtualDisplay virtualDisplay;
@@ -474,77 +474,6 @@ public class ScreenCaptureService extends Service {
                     rawCrop.getHeight() * UPSCALE_FACTOR,
                     true);
 
-            final Bitmap cropToRelease = rawCrop;
-            final Bitmap enlargedToRelease = enlarged;
-
-            snapshot.append("[")
-                    .append(region.name)
-                    .append("]\n");
-
-            InputImage input =
-                    InputImage.fromBitmap(enlarged, 0);
-
-            textRecognizer.process(input)
-
-                    .addOnSuccessListener(result -> {
-
-                        String text = result.getText();
-
-                        if (text != null && !text.trim().isEmpty()) {
-                            snapshot.append(text.trim()).append("\n");
-                        }
-                    })
-
-                    .addOnFailureListener(error -> {
-
-                        Log.e(
-                                "IdleSoapAI",
-                                "OCR failed for " + region.name,
-                                error);
-
-                        snapshot.append("Recognition error\n");
-                    })
-
-                    .addOnCompleteListener(task -> {
-
-                        if (enlargedToRelease != cropToRelease
-                                && !enlargedToRelease.isRecycled()) {
-                            enlargedToRelease.recycle();
-                        }
-
-                        if (!cropToRelease.isRecycled()) {
-                            cropToRelease.recycle();
-                                                    }
-
-                        processNextRegion(
-                                source,
-                                regionIndex + 1,
-                                snapshot);
-                    });
-
-        } catch (Exception e) {
-
-            Log.e(
-                    "IdleSoapAI",
-                    "Could not process region " + region.name,
-                    e);
-
-            if (enlarged != null && !enlarged.isRecycled()) {
-                enlarged.recycle();
-            }
-
-            if (rawCrop != null && !rawCrop.isRecycled()) {
-                rawCrop.recycle();
-            }
-
-            snapshot.append("Recognition error\n");
-
-            processNextRegion(
-                    source,
-                    regionIndex + 1,
-                    snapshot);
-        }
-    }
 private void processNextRegion(
         Bitmap source,
         int regionIndex,
