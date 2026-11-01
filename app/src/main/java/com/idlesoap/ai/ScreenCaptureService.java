@@ -95,19 +95,19 @@ public class ScreenCaptureService extends Service {
 
             new OcrRegion(
                     "CUTTING PROGRESS",
-                    0.29f, 0.635f, 0.70f, 0.705f),
+                    0.29f, 0.60f, 0.70f, 0.705f),
 
             new OcrRegion(
                     "CUT UPGRADE",
-                    0.18f, 0.71f, 0.38f, 0.86f),
+                    0.18f, 0.675f, 0.38f, 0.86f),
 
             new OcrRegion(
                     "INCOME UPGRADE",
-                    0.40f, 0.71f, 0.60f, 0.86f),
+                    0.40f, 0.675f, 0.60f, 0.86f),
 
             new OcrRegion(
                     "SPEED UPGRADE",
-                    0.62f, 0.71f, 0.82f, 0.86f)
+                    0.62f, 0.675f, 0.82f, 0.86f)
     };
 
     private MediaProjection projection;
