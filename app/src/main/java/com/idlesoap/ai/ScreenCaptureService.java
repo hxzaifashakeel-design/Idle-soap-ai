@@ -385,9 +385,9 @@ public class ScreenCaptureService extends Service {
                     ocrInProgress = true;
 
                     processNextRegion(
-                            ocrFrame,
-                            0,
-                            new StringBuilder());
+                           ocrFrame,
+                           0,
+                           new String[OCR_REGIONS.length]);
                 }
             }
 
@@ -514,38 +514,137 @@ public class ScreenCaptureService extends Service {
 
                         if (!cropToRelease.isRecycled()) {
                             cropToRelease.recycle();
-                        }
+private void processNextRegion(
+        Bitmap source,
+        int regionIndex,
+        String[] regionResults) {
 
-                        processNextRegion(
-                                source,
-                                regionIndex + 1,
-                                snapshot);
-                    });
+    if (regionIndex >= OCR_REGIONS.length) {
 
-        } catch (Exception e) {
+        StringBuilder snapshot = new StringBuilder();
 
-            Log.e(
-                    "IdleSoapAI",
-                    "Could not process region " + region.name,
-                    e);
+        for (int i = 0; i < OCR_REGIONS.length; i++) {
+            snapshot.append("[")
+                    .append(OCR_REGIONS[i].name)
+                    .append("]\n");
 
-            if (enlarged != null && !enlarged.isRecycled()) {
-                enlarged.recycle();
+            String value = regionResults[i];
+
+            if (value != null && !value.trim().isEmpty()) {
+                snapshot.append(value.trim()).append("\n");
+            } else {
+                snapshot.append("Not detected\n");
             }
-
-            if (rawCrop != null && !rawCrop.isRecycled()) {
-                rawCrop.recycle();
-            }
-
-            snapshot.append("Recognition error\n");
-
-            processNextRegion(
-                    source,
-                    regionIndex + 1,
-                    snapshot);
         }
+
+        saveOcrResult(snapshot.toString());
+
+        ocrInProgress = false;
+
+        if (!source.isRecycled()) {
+            source.recycle();
+        }
+
+        return;
     }
 
+    OcrRegion region = OCR_REGIONS[regionIndex];
+
+    Bitmap rawCrop = null;
+    Bitmap enlarged = null;
+
+    try {
+
+        int left = Math.max(0, Math.min(
+                source.getWidth() - 1,
+                Math.round(source.getWidth() * region.left)));
+
+        int top = Math.max(0, Math.min(
+                source.getHeight() - 1,
+                Math.round(source.getHeight() * region.top)));
+
+        int right = Math.max(left + 1, Math.min(
+                source.getWidth(),
+                Math.round(source.getWidth() * region.right)));
+
+        int bottom = Math.max(top + 1, Math.min(
+                source.getHeight(),
+                Math.round(source.getHeight() * region.bottom)));
+
+        rawCrop = Bitmap.createBitmap(
+                source,
+                left,
+                top,
+                right - left,
+                bottom - top);
+
+        enlarged = Bitmap.createScaledBitmap(
+                rawCrop,
+                rawCrop.getWidth() * UPSCALE_FACTOR,
+                rawCrop.getHeight() * UPSCALE_FACTOR,
+                true);
+
+        final Bitmap cropToRelease = rawCrop;
+        final Bitmap enlargedToRelease = enlarged;
+
+        InputImage input =
+                InputImage.fromBitmap(enlarged, 0);
+
+        textRecognizer.process(input)
+
+                .addOnSuccessListener(result -> {
+                    regionResults[regionIndex] = result.getText();
+                })
+
+                .addOnFailureListener(error -> {
+                    Log.e(
+                            "IdleSoapAI",
+                            "OCR failed for " + region.name,
+                            error);
+
+                    regionResults[regionIndex] = "Recognition error";
+                })
+
+                .addOnCompleteListener(task -> {
+
+                    if (enlargedToRelease != cropToRelease
+                            && !enlargedToRelease.isRecycled()) {
+                        enlargedToRelease.recycle();
+                    }
+
+                    if (!cropToRelease.isRecycled()) {
+                        cropToRelease.recycle();
+                    }
+
+                    processNextRegion(
+                            source,
+                            regionIndex + 1,
+                            regionResults);
+                });
+
+    } catch (Exception e) {
+
+        Log.e(
+                "IdleSoapAI",
+                "Could not process " + region.name,
+                e);
+
+        if (enlarged != null && !enlarged.isRecycled()) {
+            enlarged.recycle();
+        }
+
+        if (rawCrop != null && !rawCrop.isRecycled()) {
+            rawCrop.recycle();
+        }
+
+        regionResults[regionIndex] = "Recognition error";
+
+        processNextRegion(
+                source,
+                regionIndex + 1,
+                regionResults);
+    }
+}
     private void saveOcrResult(String recognizedText) {
 
         File output =
