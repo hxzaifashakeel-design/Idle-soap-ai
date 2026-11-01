@@ -514,6 +514,37 @@ public class ScreenCaptureService extends Service {
 
                         if (!cropToRelease.isRecycled()) {
                             cropToRelease.recycle();
+                                                    }
+
+                        processNextRegion(
+                                source,
+                                regionIndex + 1,
+                                snapshot);
+                    });
+
+        } catch (Exception e) {
+
+            Log.e(
+                    "IdleSoapAI",
+                    "Could not process region " + region.name,
+                    e);
+
+            if (enlarged != null && !enlarged.isRecycled()) {
+                enlarged.recycle();
+            }
+
+            if (rawCrop != null && !rawCrop.isRecycled()) {
+                rawCrop.recycle();
+            }
+
+            snapshot.append("Recognition error\n");
+
+            processNextRegion(
+                    source,
+                    regionIndex + 1,
+                    snapshot);
+        }
+    }
 private void processNextRegion(
         Bitmap source,
         int regionIndex,
