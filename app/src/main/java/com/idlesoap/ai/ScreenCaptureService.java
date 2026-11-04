@@ -12,6 +12,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
@@ -24,15 +25,18 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.WindowManager;
-import android.content.pm.ServiceInfo;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ScreenCaptureService extends Service {
 
@@ -49,10 +53,13 @@ public class ScreenCaptureService extends Service {
     private static final int NOTIFICATION_ID = 101;
 
     private static final long OCR_INTERVAL_MS = 3500L;
+    private static final long FRAME_SAVE_INTERVAL_MS = 1000L;
     private static final int UPSCALE_FACTOR = 2;
+    private static final int PREVIEW_MAX_SIDE = 640;
+    private static final int PREVIEW_JPEG_QUALITY = 75;
 
-    private static final class OcrRegion {
-
+    // Package-visible so MainActivity can draw the exact same OCR rectangles.
+    static final class OcrRegion {
         final String name;
         final float left;
         final float top;
@@ -61,7 +68,6 @@ public class ScreenCaptureService extends Service {
 
         OcrRegion(String name, float left, float top,
                   float right, float bottom) {
-
             this.name = name;
             this.left = left;
             this.top = top;
@@ -70,69 +76,50 @@ public class ScreenCaptureService extends Service {
         }
     }
 
-    // Region positions are based on your supplied gameplay screenshot.
-    private static final OcrRegion[] OCR_REGIONS = {
-
-    new OcrRegion(
-            "MONEY",
-            0.005f, 0.025f, 0.195f, 0.065f),
-
-    new OcrRegion(
-            "EARNINGS",
-            0.015f, 0.066f, 0.19f, 0.095f),
-
-    new OcrRegion(
-            "SOAP STATUS",
-            0.29f, 0.055f, 0.52f, 0.108f),
-
-    new OcrRegion(
-            "SOAP NAME",
-            0.36f, 0.135f, 0.50f, 0.16f),
-
-    new OcrRegion(
-            "BOOSTS",
-            0.005f, 0.195f, 0.13f, 0.44f),
-
-    new OcrRegion(
-            "CUTTING PROGRESS",
-            0.24f, 0.51f, 0.56f, 0.565f),
-
-    new OcrRegion(
-            "CUT UPGRADE",
-            0.15f, 0.565f, 0.31f, 0.69f),
-
-    new OcrRegion(
-            "INCOME UPGRADE",
-            0.325f, 0.565f, 0.48f, 0.69f),
-
-    new OcrRegion(
-            "SPEED UPGRADE",
-            0.505f, 0.565f, 0.66f, 0.69f)
-};
+    // Normalized coordinates (0.0 to 1.0) relative to the captured frame.
+    // Keep these as the single source of truth for OCR and the visual overlay.
+    static final OcrRegion[] OCR_REGIONS = {
+            new OcrRegion("MONEY", 0.005f, 0.025f, 0.195f, 0.065f),
+            new OcrRegion("EARNINGS", 0.015f, 0.066f, 0.19f, 0.095f),
+            new OcrRegion("SOAP STATUS", 0.29f, 0.055f, 0.52f, 0.108f),
+            new OcrRegion("SOAP NAME", 0.36f, 0.135f, 0.50f, 0.16f),
+            new OcrRegion("BOOSTS", 0.005f, 0.195f, 0.13f, 0.44f),
+            new OcrRegion("CUTTING PROGRESS", 0.24f, 0.51f, 0.56f, 0.565f),
+            new OcrRegion("CUT UPGRADE", 0.15f, 0.565f, 0.31f, 0.69f),
+            new OcrRegion("INCOME UPGRADE", 0.325f, 0.565f, 0.48f, 0.69f),
+            new OcrRegion("SPEED UPGRADE", 0.505f, 0.565f, 0.66f, 0.69f)
+    };
 
     private MediaProjection projection;
-private volatile VirtualDisplay virtualDisplay;
-private ImageReader imageReader;
-    
+    private volatile VirtualDisplay virtualDisplay;
+    private volatile ImageReader imageReader;
+
     private HandlerThread handlerThread;
     private Handler imageHandler;
 
-    private int screenWidth;
-private int screenHeight;
-private int screenDensityDpi;
+    private volatile int screenWidth;
+    private volatile int screenHeight;
+    private int screenDensityDpi;
 
-private volatile int pendingResizeWidth;
-private volatile int pendingResizeHeight;
+    private volatile int pendingResizeWidth;
+    private volatile int pendingResizeHeight;
+    private volatile int resizeCallbackCount;
+    private volatile int lastResizeCallbackWidth;
+    private volatile int lastResizeCallbackHeight;
+    private volatile int lastFrameWidth;
+    private volatile int lastFrameHeight;
+
+    private volatile boolean ocrInProgress = false;
+    private volatile boolean previewSavePending = false;
 
     private long lastSavedTime = 0L;
     private long lastOcrTime = 0L;
 
     private TextRecognizer textRecognizer;
-    private volatile boolean ocrInProgress = false;
+    private ExecutorService previewExecutor;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-
         if (intent == null) {
             stopSelf();
             return START_NOT_STICKY;
@@ -147,11 +134,8 @@ private volatile int pendingResizeHeight;
             return START_NOT_STICKY;
         }
 
-        int resultCode =
-                intent.getIntExtra(EXTRA_RESULT_CODE, 0);
-
-        Intent resultData =
-                intent.getParcelableExtra(EXTRA_RESULT_DATA);
+        int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
+        Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
 
         if (resultData == null) {
             stopSelf();
@@ -161,24 +145,18 @@ private volatile int pendingResizeHeight;
         startCaptureNotification();
 
         try {
-
             MediaProjectionManager manager =
-                    (MediaProjectionManager)
-                    getSystemService(
+                    (MediaProjectionManager) getSystemService(
                             Context.MEDIA_PROJECTION_SERVICE);
 
-            projection = manager.getMediaProjection(
-                    resultCode, resultData);
-
+            projection = manager.getMediaProjection(resultCode, resultData);
             if (projection == null) {
                 stopSelf();
                 return START_NOT_STICKY;
             }
 
             startScreenCapture();
-
         } catch (Exception e) {
-
             Log.e("IdleSoapAI", "Capture failed", e);
             stopSelf();
         }
@@ -187,38 +165,29 @@ private volatile int pendingResizeHeight;
     }
 
     private void startCaptureNotification() {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-            NotificationChannel channel =
-                    new NotificationChannel(
-                            CHANNEL_ID,
-                            "Screen Capture",
-                            NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Screen Capture",
+                    NotificationManager.IMPORTANCE_LOW);
 
             NotificationManager manager =
                     getSystemService(NotificationManager.class);
-
             manager.createNotificationChannel(channel);
         }
 
-        Intent stopIntent =
-                new Intent(this, ScreenCaptureService.class);
-
+        Intent stopIntent = new Intent(this, ScreenCaptureService.class);
         stopIntent.setAction(ACTION_STOP);
 
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-
         if (Build.VERSION.SDK_INT >= 23) {
             flags |= PendingIntent.FLAG_IMMUTABLE;
         }
 
-        PendingIntent stopPendingIntent =
-                PendingIntent.getService(
-                        this, 102, stopIntent, flags);
+        PendingIntent stopPendingIntent = PendingIntent.getService(
+                this, 102, stopIntent, flags);
 
         Notification.Builder builder;
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             builder = new Notification.Builder(this, CHANNEL_ID);
         } else {
@@ -247,268 +216,250 @@ private volatile int pendingResizeHeight;
     }
 
     private void startScreenCapture() {
-
-        DisplayMetrics metrics =
-                getResources().getDisplayMetrics();
-
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
         screenWidth = metrics.widthPixels;
         screenHeight = metrics.heightPixels;
-
         screenDensityDpi = metrics.densityDpi;
 
         if (Build.VERSION.SDK_INT >= 30) {
-
             WindowManager wm =
                     (WindowManager) getSystemService(WINDOW_SERVICE);
-
             android.graphics.Rect bounds =
                     wm.getMaximumWindowMetrics().getBounds();
-
             screenWidth = bounds.width();
             screenHeight = bounds.height();
         }
 
-        handlerThread =
-                new HandlerThread("IdleSoapAI-Capture");
-
+        handlerThread = new HandlerThread("IdleSoapAI-Capture");
         handlerThread.start();
+        imageHandler = new Handler(handlerThread.getLooper());
 
-        imageHandler =
-                new Handler(handlerThread.getLooper());
-
-        textRecognizer =
-                TextRecognition.getClient(
-                        TextRecognizerOptions.DEFAULT_OPTIONS);
+        previewExecutor = Executors.newSingleThreadExecutor();
+        textRecognizer = TextRecognition.getClient(
+                TextRecognizerOptions.DEFAULT_OPTIONS);
 
         imageReader = ImageReader.newInstance(
                 screenWidth,
                 screenHeight,
                 PixelFormat.RGBA_8888,
                 2);
-
         imageReader.setOnImageAvailableListener(
                 this::saveLatestFrame,
                 imageHandler);
 
-        
-    
-       projection.registerCallback(
-        new MediaProjection.Callback() {
+        projection.registerCallback(
+                new MediaProjection.Callback() {
+                    @Override
+                    public void onStop() {
+                        stopSelf();
+                    }
 
-            @Override
-            public void onStop() {
-                stopSelf();
-            }
+                    @Override
+                    public void onCapturedContentResize(int width, int height) {
+                        if (width <= 0 || height <= 0) {
+                            return;
+                        }
 
-            @Override
-            public void onCapturedContentResize(
-                    int width,
-                    int height) {
+                        resizeCallbackCount++;
+                        lastResizeCallbackWidth = width;
+                        lastResizeCallbackHeight = height;
 
-                if (width <= 0 || height <= 0) {
-                    return;
-                }
+                        if (virtualDisplay == null) {
+                            pendingResizeWidth = width;
+                            pendingResizeHeight = height;
+                            return;
+                        }
 
-                if (virtualDisplay == null) {
-                    pendingResizeWidth = width;
-                    pendingResizeHeight = height;
-                    return;
-                }
-
-                resizeCapture(width, height);
-            }
-        },
-        imageHandler);
-
-virtualDisplay = projection.createVirtualDisplay(
-        "IdleSoapAI-Capture",
-        screenWidth,
-        screenHeight,
-        screenDensityDpi,
-        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-        imageReader.getSurface(),
-        null,
-        imageHandler);
-
-// Apply a resize callback that arrived during display creation.
-int pendingWidth = pendingResizeWidth;
-int pendingHeight = pendingResizeHeight;
-
-pendingResizeWidth = 0;
-pendingResizeHeight = 0;
-
-if (pendingWidth > 0 && pendingHeight > 0) {
-    imageHandler.post(() ->
-            resizeCapture(pendingWidth, pendingHeight));
-     }
-    }      
-        private void resizeCapture(int width, int height) {
-
-    if (width <= 0
-            || height <= 0
-            || virtualDisplay == null
-            || imageHandler == null) {
-        return;
-    }
-
-    if (width == screenWidth && height == screenHeight) {
-        return;
-    }
-
-    ImageReader replacementReader = null;
-
-    try {
-
-        replacementReader = ImageReader.newInstance(
-                width,
-                height,
-                PixelFormat.RGBA_8888,
-                2);
-
-        replacementReader.setOnImageAvailableListener(
-                this::saveLatestFrame,
+                        resizeCapture(width, height);
+                    }
+                },
                 imageHandler);
 
-        ImageReader previousReader = imageReader;
+        virtualDisplay = projection.createVirtualDisplay(
+                "IdleSoapAI-Capture",
+                screenWidth,
+                screenHeight,
+                screenDensityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(),
+                null,
+                imageHandler);
 
-        // Resize the virtual display first.
-        virtualDisplay.resize(
-                width,
-                height,
-                screenDensityDpi);
+        writeCaptureDiagnostics("Display created; waiting for first frame");
 
-        // Attach the correctly sized output surface.
-        virtualDisplay.setSurface(
-                replacementReader.getSurface());
+        // Apply a resize callback that arrived during display creation.
+        int pendingWidth = pendingResizeWidth;
+        int pendingHeight = pendingResizeHeight;
+        pendingResizeWidth = 0;
+        pendingResizeHeight = 0;
 
-        imageReader = replacementReader;
-
-        screenWidth = width;
-        screenHeight = height;
-
-        lastSavedTime = 0L;
-        lastOcrTime = 0L;
-
-        if (previousReader != null) {
-            previousReader.close();
+        if (pendingWidth > 0 && pendingHeight > 0) {
+            imageHandler.post(() -> resizeCapture(pendingWidth, pendingHeight));
         }
-
-        Log.i(
-                "IdleSoapAI",
-                "Capture resized to "
-                        + width + " x " + height);
-
-    } catch (Exception e) {
-
-        if (replacementReader != null
-                && replacementReader != imageReader) {
-            replacementReader.close();
-        }
-
-        Log.e(
-                "IdleSoapAI",
-                "Could not resize screen capture",
-                e);
     }
+
+    private void resizeCapture(int width, int height) {
+        if (width <= 0 || height <= 0 || imageHandler == null) {
+            return;
         }
-    
+
+        if (Looper.myLooper() != imageHandler.getLooper()) {
+            imageHandler.post(() -> resizeCapture(width, height));
+            return;
+        }
+
+        VirtualDisplay display = virtualDisplay;
+        if (display == null) {
+            pendingResizeWidth = width;
+            pendingResizeHeight = height;
+            return;
+        }
+
+        if (width == screenWidth && height == screenHeight) {
+            writeCaptureDiagnostics("Resize callback received; size unchanged");
+            return;
+        }
+
+        ImageReader previousReader = imageReader;
+        ImageReader replacementReader = null;
+
+        try {
+            replacementReader = ImageReader.newInstance(
+                    width,
+                    height,
+                    PixelFormat.RGBA_8888,
+                    2);
+            replacementReader.setOnImageAvailableListener(
+                    this::saveLatestFrame,
+                    imageHandler);
+
+            // Android requires both the VirtualDisplay and output Surface to match.
+            display.resize(width, height, screenDensityDpi);
+            display.setSurface(replacementReader.getSurface());
+
+            imageReader = replacementReader;
+            screenWidth = width;
+            screenHeight = height;
+            lastFrameWidth = 0;
+            lastFrameHeight = 0;
+            lastSavedTime = 0L;
+            lastOcrTime = 0L;
+
+            if (previousReader != null) {
+                previousReader.close();
+            }
+
+            writeCaptureDiagnostics("Capture resized successfully");
+            Log.i("IdleSoapAI", "Capture resized to " + width + " x " + height);
+        } catch (Exception e) {
+            // Try to keep the previous output surface active if resizing failed.
+            try {
+                if (previousReader != null) {
+                    display.setSurface(previousReader.getSurface());
+                }
+            } catch (Exception restoreError) {
+                Log.e("IdleSoapAI", "Could not restore previous capture surface", restoreError);
+            }
+
+            if (replacementReader != null && replacementReader != imageReader) {
+                replacementReader.close();
+            }
+
+            writeCaptureDiagnostics("Resize failed: " + e.getClass().getSimpleName());
+            Log.e("IdleSoapAI", "Could not resize screen capture", e);
+        }
+    }
 
     private void saveLatestFrame(ImageReader reader) {
-
         Image image = null;
         Bitmap paddedBitmap = null;
         Bitmap screenBitmap = null;
 
         try {
+            // Ignore a delayed callback from an ImageReader that has been replaced.
+            if (reader != imageReader) {
+                image = reader.acquireLatestImage();
+                return;
+            }
 
             image = reader.acquireLatestImage();
-
             if (image == null) {
                 return;
             }
 
-            long now = SystemClock.elapsedRealtime();
+            int frameWidth = image.getWidth();
+            int frameHeight = image.getHeight();
+            if (frameWidth <= 0 || frameHeight <= 0) {
+                return;
+            }
 
-            if (now - lastSavedTime < 1000L) {
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastSavedTime < FRAME_SAVE_INTERVAL_MS) {
                 return;
             }
 
             Image.Plane plane = image.getPlanes()[0];
-
             ByteBuffer buffer = plane.getBuffer();
-
             int pixelStride = plane.getPixelStride();
             int rowStride = plane.getRowStride();
 
-            int rowPadding =
-                    rowStride - pixelStride * screenWidth;
+            if (pixelStride <= 0 || rowStride <= 0) {
+                return;
+            }
 
-            int paddedWidth =
-                    screenWidth + rowPadding / pixelStride;
+            int rowPadding = rowStride - pixelStride * frameWidth;
+            int paddedWidth = frameWidth + Math.max(0, rowPadding / pixelStride);
 
             paddedBitmap = Bitmap.createBitmap(
                     paddedWidth,
-                    screenHeight,
+                    frameHeight,
                     Bitmap.Config.ARGB_8888);
-
+            buffer.rewind();
             paddedBitmap.copyPixelsFromBuffer(buffer);
 
             screenBitmap = Bitmap.createBitmap(
                     paddedBitmap,
                     0,
                     0,
-                    screenWidth,
-                    screenHeight);
+                    frameWidth,
+                    frameHeight);
 
-            // High-quality preview. OCR uses the original bitmap.
-            File previewFile =
-                    new File(getCacheDir(), "latest_screen.jpg");
+            lastFrameWidth = frameWidth;
+            lastFrameHeight = frameHeight;
+            screenWidth = frameWidth;
+            screenHeight = frameHeight;
+            writeCaptureDiagnostics("Frame received");
 
-            try (FileOutputStream stream =
-                         new FileOutputStream(previewFile)) {
-
-                screenBitmap.compress(
-                        Bitmap.CompressFormat.JPEG,
-                        90,
-                        stream);
-
-                stream.flush();
-            }
-
+            // A reduced preview is generated separately; OCR keeps full resolution.
+            schedulePreviewSave(screenBitmap);
             lastSavedTime = now;
 
             if (textRecognizer != null
                     && !ocrInProgress
                     && now - lastOcrTime >= OCR_INTERVAL_MS) {
-
-                Bitmap ocrFrame =
-                        screenBitmap.copy(
-                                Bitmap.Config.ARGB_8888, false);
+                Bitmap ocrFrame = screenBitmap.copy(
+                        Bitmap.Config.ARGB_8888,
+                        false);
 
                 if (ocrFrame != null) {
-
                     lastOcrTime = now;
                     ocrInProgress = true;
-
                     processNextRegion(
-                           ocrFrame,
-                           0,
-                           new String[OCR_REGIONS.length]);
+                            ocrFrame,
+                            0,
+                            new String[OCR_REGIONS.length]);
                 }
             }
-
         } catch (Exception e) {
-
             Log.e("IdleSoapAI", "Frame capture failed", e);
-
         } finally {
-
             if (screenBitmap != null
-                    && screenBitmap != paddedBitmap) {
+                    && screenBitmap != paddedBitmap
+                    && !screenBitmap.isRecycled()) {
                 screenBitmap.recycle();
             }
 
-            if (paddedBitmap != null) {
+            if (paddedBitmap != null && !paddedBitmap.isRecycled()) {
                 paddedBitmap.recycle();
             }
 
@@ -518,188 +469,268 @@ if (pendingWidth > 0 && pendingHeight > 0) {
         }
     }
 
-    
-
-private void processNextRegion(
-        Bitmap source,
-        int regionIndex,
-        String[] regionResults) {
-
-    if (regionIndex >= OCR_REGIONS.length) {
-
-        StringBuilder snapshot = new StringBuilder();
-
-        for (int i = 0; i < OCR_REGIONS.length; i++) {
-            snapshot.append("[")
-                    .append(OCR_REGIONS[i].name)
-                    .append("]\n");
-
-            String value = regionResults[i];
-
-            if (value != null && !value.trim().isEmpty()) {
-                snapshot.append(value.trim()).append("\n");
-            } else {
-                snapshot.append("Not detected\n");
-            }
-        }
-
-        saveOcrResult(snapshot.toString());
-
-        ocrInProgress = false;
-
-        if (!source.isRecycled()) {
-            source.recycle();
-        }
-
-        return;
-    }
-
-    OcrRegion region = OCR_REGIONS[regionIndex];
-
-    Bitmap rawCrop = null;
-    Bitmap enlarged = null;
-
-    try {
-
-        int left = Math.max(0, Math.min(
-                source.getWidth() - 1,
-                Math.round(source.getWidth() * region.left)));
-
-        int top = Math.max(0, Math.min(
-                source.getHeight() - 1,
-                Math.round(source.getHeight() * region.top)));
-
-        int right = Math.max(left + 1, Math.min(
-                source.getWidth(),
-                Math.round(source.getWidth() * region.right)));
-
-        int bottom = Math.max(top + 1, Math.min(
-                source.getHeight(),
-                Math.round(source.getHeight() * region.bottom)));
-
-        rawCrop = Bitmap.createBitmap(
-                source,
-                left,
-                top,
-                right - left,
-                bottom - top);
-
-        enlarged = Bitmap.createScaledBitmap(
-                rawCrop,
-                rawCrop.getWidth() * UPSCALE_FACTOR,
-                rawCrop.getHeight() * UPSCALE_FACTOR,
-                true);
-
-        final Bitmap cropToRelease = rawCrop;
-        final Bitmap enlargedToRelease = enlarged;
-
-        InputImage input =
-                InputImage.fromBitmap(enlarged, 0);
-
-        textRecognizer.process(input)
-
-                .addOnSuccessListener(result -> {
-                    regionResults[regionIndex] = result.getText();
-                })
-
-                .addOnFailureListener(error -> {
-                    Log.e(
-                            "IdleSoapAI",
-                            "OCR failed for " + region.name,
-                            error);
-
-                    regionResults[regionIndex] = "Recognition error";
-                })
-
-                .addOnCompleteListener(task -> {
-
-                    if (enlargedToRelease != cropToRelease
-                            && !enlargedToRelease.isRecycled()) {
-                        enlargedToRelease.recycle();
-                    }
-
-                    if (!cropToRelease.isRecycled()) {
-                        cropToRelease.recycle();
-                    }
-
-                    processNextRegion(
-                            source,
-                            regionIndex + 1,
-                            regionResults);
-                });
-
-    } catch (Exception e) {
-
-        Log.e(
-                "IdleSoapAI",
-                "Could not process " + region.name,
-                e);
-
-        if (enlarged != null && !enlarged.isRecycled()) {
-            enlarged.recycle();
-        }
-
-        if (rawCrop != null && !rawCrop.isRecycled()) {
-            rawCrop.recycle();
-        }
-
-        regionResults[regionIndex] = "Recognition error";
-
-        processNextRegion(
-                source,
-                regionIndex + 1,
-                regionResults);
-    }
-}
-    private void saveOcrResult(String recognizedText) {
-
-        File output =
-                new File(getCacheDir(), "latest_ocr.txt");
-
-        File temporary =
-                new File(getCacheDir(), "latest_ocr.tmp");
-
-        try (FileOutputStream stream =
-                     new FileOutputStream(temporary)) {
-
-            String value =
-                    recognizedText == null ? "" : recognizedText;
-
-            stream.write(
-                    value.getBytes(
-                            java.nio.charset.StandardCharsets.UTF_8));
-
-            stream.flush();
-
-        } catch (Exception e) {
-
-            Log.e("IdleSoapAI", "Could not write OCR snapshot", e);
+    private void schedulePreviewSave(Bitmap source) {
+        if (source == null
+                || source.isRecycled()
+                || previewExecutor == null
+                || previewExecutor.isShutdown()
+                || previewSavePending) {
             return;
         }
 
-        if (output.exists() && !output.delete()) {
+        previewSavePending = true;
+        Bitmap previewBitmap = null;
 
-            Log.e(
-                    "IdleSoapAI",
-                    "Could not replace previous OCR snapshot");
+        try {
+            int sourceMaxSide = Math.max(source.getWidth(), source.getHeight());
+            float scale = Math.min(1.0f, (float) PREVIEW_MAX_SIDE / sourceMaxSide);
+            int targetWidth = Math.max(1, Math.round(source.getWidth() * scale));
+            int targetHeight = Math.max(1, Math.round(source.getHeight() * scale));
 
+            previewBitmap = Bitmap.createScaledBitmap(
+                    source,
+                    targetWidth,
+                    targetHeight,
+                    true);
+
+            if (previewBitmap == source) {
+                previewBitmap = source.copy(Bitmap.Config.ARGB_8888, false);
+            }
+
+            if (previewBitmap == null) {
+                previewSavePending = false;
+                return;
+            }
+        } catch (Exception e) {
+            previewSavePending = false;
+            Log.e("IdleSoapAI", "Could not create reduced preview", e);
+            return;
+        }
+
+        final Bitmap bitmapToSave = previewBitmap;
+        try {
+            previewExecutor.execute(() -> {
+                File output = new File(getCacheDir(), "latest_screen.jpg");
+                File temporary = new File(getCacheDir(), "latest_screen.tmp");
+
+                try {
+                    try (FileOutputStream stream = new FileOutputStream(temporary)) {
+                        boolean compressed = bitmapToSave.compress(
+                                Bitmap.CompressFormat.JPEG,
+                                PREVIEW_JPEG_QUALITY,
+                                stream);
+                        if (!compressed) {
+                            throw new IllegalStateException("Preview compression failed");
+                        }
+                        stream.flush();
+                    }
+
+                    if (!temporary.renameTo(output)) {
+                        if (output.exists() && !output.delete()) {
+                            throw new IllegalStateException("Could not replace preview file");
+                        }
+                        if (!temporary.renameTo(output)) {
+                            throw new IllegalStateException("Could not publish preview file");
+                        }
+                    }
+                } catch (Exception e) {
+                    temporary.delete();
+                    Log.e("IdleSoapAI", "Could not save preview", e);
+                } finally {
+                    if (!bitmapToSave.isRecycled()) {
+                        bitmapToSave.recycle();
+                    }
+                    previewSavePending = false;
+                }
+            });
+        } catch (RuntimeException e) {
+            if (!bitmapToSave.isRecycled()) {
+                bitmapToSave.recycle();
+            }
+            previewSavePending = false;
+            Log.e("IdleSoapAI", "Preview worker unavailable", e);
+        }
+    }
+
+    private void writeCaptureDiagnostics(String note) {
+        int width = screenWidth;
+        int height = screenHeight;
+        int frameWidth = lastFrameWidth;
+        int frameHeight = lastFrameHeight;
+        int callbackWidth = lastResizeCallbackWidth;
+        int callbackHeight = lastResizeCallbackHeight;
+
+        String aspect = "unknown";
+        if (height > 0) {
+            aspect = String.format(
+                    Locale.US,
+                    "%.3f",
+                    (double) width / (double) height);
+        }
+
+        String callbackText = resizeCallbackCount == 0
+                ? "not received"
+                : resizeCallbackCount + " time(s), last "
+                    + callbackWidth + " x " + callbackHeight;
+
+        String diagnostics =
+                "CAPTURE DIAGNOSTICS\n"
+                + "ImageReader size: " + width + " x " + height + " px\n"
+                + "Latest frame: "
+                + (frameWidth > 0 ? frameWidth + " x " + frameHeight : "waiting")
+                + " px\n"
+                + "Aspect ratio (width/height): " + aspect + "\n"
+                + "Density: " + screenDensityDpi + " dpi\n"
+                + "Resize callback: " + callbackText + "\n"
+                + "OCR regions: " + OCR_REGIONS.length + "\n"
+                + "Preview: max side " + PREVIEW_MAX_SIDE
+                + " px, JPEG quality " + PREVIEW_JPEG_QUALITY + "\n"
+                + "Status: " + note + "\n";
+
+        File output = new File(getCacheDir(), "latest_capture_info.txt");
+        File temporary = new File(getCacheDir(), "latest_capture_info.tmp");
+
+        try (FileOutputStream stream = new FileOutputStream(temporary)) {
+            stream.write(diagnostics.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            stream.flush();
+        } catch (Exception e) {
+            Log.e("IdleSoapAI", "Could not write capture diagnostics", e);
             temporary.delete();
             return;
         }
 
         if (!temporary.renameTo(output)) {
+            if (output.exists()) {
+                output.delete();
+            }
+            if (!temporary.renameTo(output)) {
+                Log.e("IdleSoapAI", "Could not publish capture diagnostics");
+                temporary.delete();
+            }
+        }
+    }
 
-            Log.e(
-                    "IdleSoapAI",
-                    "Could not publish OCR snapshot");
+    private void processNextRegion(
+            Bitmap source,
+            int regionIndex,
+            String[] regionResults) {
+        if (regionIndex >= OCR_REGIONS.length) {
+            StringBuilder snapshot = new StringBuilder();
 
+            for (int i = 0; i < OCR_REGIONS.length; i++) {
+                snapshot.append("[")
+                        .append(OCR_REGIONS[i].name)
+                        .append("]\n");
+
+                String value = regionResults[i];
+                if (value != null && !value.trim().isEmpty()) {
+                    snapshot.append(value.trim()).append("\n");
+                } else {
+                    snapshot.append("Not detected\n");
+                }
+            }
+
+            saveOcrResult(snapshot.toString());
+            ocrInProgress = false;
+
+            if (!source.isRecycled()) {
+                source.recycle();
+            }
+            return;
+        }
+
+        OcrRegion region = OCR_REGIONS[regionIndex];
+        Bitmap rawCrop = null;
+        Bitmap enlarged = null;
+
+        try {
+            int left = Math.max(0, Math.min(
+                    source.getWidth() - 1,
+                    Math.round(source.getWidth() * region.left)));
+            int top = Math.max(0, Math.min(
+                    source.getHeight() - 1,
+                    Math.round(source.getHeight() * region.top)));
+            int right = Math.max(left + 1, Math.min(
+                    source.getWidth(),
+                    Math.round(source.getWidth() * region.right)));
+            int bottom = Math.max(top + 1, Math.min(
+                    source.getHeight(),
+                    Math.round(source.getHeight() * region.bottom)));
+
+            rawCrop = Bitmap.createBitmap(
+                    source,
+                    left,
+                    top,
+                    right - left,
+                    bottom - top);
+            enlarged = Bitmap.createScaledBitmap(
+                    rawCrop,
+                    rawCrop.getWidth() * UPSCALE_FACTOR,
+                    rawCrop.getHeight() * UPSCALE_FACTOR,
+                    true);
+
+            final Bitmap cropToRelease = rawCrop;
+            final Bitmap enlargedToRelease = enlarged;
+            InputImage input = InputImage.fromBitmap(enlarged, 0);
+
+            textRecognizer.process(input)
+                    .addOnSuccessListener(result -> {
+                        regionResults[regionIndex] = result.getText();
+                    })
+                    .addOnFailureListener(error -> {
+                        Log.e("IdleSoapAI", "OCR failed for " + region.name, error);
+                        regionResults[regionIndex] = "Recognition error";
+                    })
+                    .addOnCompleteListener(task -> {
+                        if (enlargedToRelease != cropToRelease
+                                && !enlargedToRelease.isRecycled()) {
+                            enlargedToRelease.recycle();
+                        }
+                        if (!cropToRelease.isRecycled()) {
+                            cropToRelease.recycle();
+                        }
+                        processNextRegion(source, regionIndex + 1, regionResults);
+                    });
+        } catch (Exception e) {
+            Log.e("IdleSoapAI", "Could not process " + region.name, e);
+            if (enlarged != null && !enlarged.isRecycled()) {
+                enlarged.recycle();
+            }
+            if (rawCrop != null && !rawCrop.isRecycled()) {
+                rawCrop.recycle();
+            }
+            regionResults[regionIndex] = "Recognition error";
+            processNextRegion(source, regionIndex + 1, regionResults);
+        }
+    }
+
+    private void saveOcrResult(String recognizedText) {
+        File output = new File(getCacheDir(), "latest_ocr.txt");
+        File temporary = new File(getCacheDir(), "latest_ocr.tmp");
+
+        try (FileOutputStream stream = new FileOutputStream(temporary)) {
+            String value = recognizedText == null ? "" : recognizedText;
+            stream.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            stream.flush();
+        } catch (Exception e) {
+            Log.e("IdleSoapAI", "Could not write OCR snapshot", e);
+            return;
+        }
+
+        if (output.exists() && !output.delete()) {
+            Log.e("IdleSoapAI", "Could not replace previous OCR snapshot");
+            temporary.delete();
+            return;
+        }
+
+        if (!temporary.renameTo(output)) {
+            Log.e("IdleSoapAI", "Could not publish OCR snapshot");
             temporary.delete();
         }
     }
 
     @Override
     public void onDestroy() {
-
         if (virtualDisplay != null) {
             virtualDisplay.release();
             virtualDisplay = null;
@@ -720,13 +751,17 @@ private void processNextRegion(
             handlerThread = null;
         }
 
-        stopForeground(true);
+        if (previewExecutor != null) {
+            previewExecutor.shutdown();
+            previewExecutor = null;
+        }
 
         if (textRecognizer != null) {
             textRecognizer.close();
             textRecognizer = null;
         }
 
+        stopForeground(true);
         super.onDestroy();
     }
 
@@ -734,4 +769,4 @@ private void processNextRegion(
     public IBinder onBind(Intent intent) {
         return null;
     }
-                  }
+}
