@@ -11,9 +11,10 @@ public final class GameStateParser {
             Pattern.compile(
                     "(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
 
+    // Recognizes levels even when OCR puts other text on the same line.
     private static final Pattern LEVEL =
             Pattern.compile(
-                    "(?i)^\\s*(?:lvl|lvi|lvy|ly|lv1|level)\\s*(\\d{1,3})\\s*$");
+                    "(?i)\\b(?:lvl|lvi|lvy|ly|lv1|level)\\s*(\\d{1,3})\\b");
 
     private static final Pattern PERCENT =
             Pattern.compile("(\\d{1,3})\\s*%");
@@ -44,11 +45,11 @@ public final class GameStateParser {
         String soapName =
                 firstUsefulLine(sections.get("SOAP NAME"));
 
-        String cuttingSection =
-                sections.get("CUTTING PROGRESS");
+        String progressLevelSection =
+                sections.get("PROGRESS LEVEL");
 
-        String cuttingLevel = findLevel(cuttingSection);
-        String cuttingProgress = findProgress(cuttingSection);
+        String progressLevel = findLevel(progressLevelSection);
+        String levelUpProgress = findProgress(progressLevelSection);
 
         String cut = findUpgrade(sections.get("CUT UPGRADE"));
         String income = findUpgrade(sections.get("INCOME UPGRADE"));
@@ -75,11 +76,11 @@ public final class GameStateParser {
         result.append("Soap completion: ")
                 .append(soapPercent).append("\n");
 
-        result.append("Cutting level: ")
-                .append(cuttingLevel).append("\n");
+        result.append("Progress level: ")
+                .append(progressLevel).append("\n");
 
-        result.append("Cutting progress: ")
-                .append(cuttingProgress).append("\n\n");
+        result.append("Level-up progress: ")
+                .append(levelUpProgress).append("\n\n");
 
         result.append("UPGRADES\n\n");
 
@@ -257,16 +258,11 @@ public final class GameStateParser {
             return "Not detected";
         }
 
-        for (String line : section.split("\\R")) {
+        Matcher matcher = LEVEL.matcher(section);
 
-            Matcher matcher = LEVEL.matcher(line.trim());
-
-            if (matcher.matches()) {
-                return matcher.group(1);
-            }
-        }
-
-        return "Not detected";
+        return matcher.find()
+                ? matcher.group(1)
+                : "Not detected";
     }
 
     private static String findUpgrade(String section) {
