@@ -92,16 +92,16 @@ public class ScreenCaptureService extends Service {
     // First calibration for the wide split-screen layout.
     // Verify these rectangles with the on-device overlay before treating them as final.
     private static final OcrRegion[] LANDSCAPE_OCR_REGIONS = {
-            new OcrRegion("MONEY", 0.005f, 0.085f, 0.16f, 0.15f),
-            new OcrRegion("EARNINGS", 0.005f, 0.15f, 0.18f, 0.21f),
-            new OcrRegion("SOAP STATUS", 0.40f, 0.12f, 0.68f, 0.23f),
-            new OcrRegion("SOAP NAME", 0.43f, 0.22f, 0.58f, 0.29f),
-            new OcrRegion("BOOSTS", 0.005f, 0.22f, 0.15f, 0.62f),
-            new OcrRegion("CUTTING PROGRESS", 0.38f, 0.67f, 0.67f, 0.75f),
-            new OcrRegion("CUT UPGRADE", 0.35f, 0.74f, 0.45f, 0.90f),
-            new OcrRegion("INCOME UPGRADE", 0.45f, 0.74f, 0.55f, 0.90f),
-            new OcrRegion("SPEED UPGRADE", 0.55f, 0.74f, 0.65f, 0.90f)
-    };
+        new OcrRegion("MONEY", 0.005f, 0.085f, 0.16f, 0.15f),
+        new OcrRegion("EARNINGS", 0.005f, 0.15f, 0.18f, 0.21f),
+        new OcrRegion("SOAP STATUS", 0.40f, 0.065f, 0.68f, 0.15f),
+        new OcrRegion("SOAP NAME", 0.43f, 0.22f, 0.58f, 0.29f),
+        new OcrRegion("BOOSTS", 0.005f, 0.22f, 0.15f, 0.62f),
+        new OcrRegion("PROGRESS LEVEL", 0.38f, 0.62f, 0.67f, 0.705f),
+        new OcrRegion("CUT UPGRADE", 0.35f, 0.70f, 0.45f, 0.90f),
+        new OcrRegion("INCOME UPGRADE", 0.45f, 0.70f, 0.55f, 0.90f),
+        new OcrRegion("SPEED UPGRADE", 0.55f, 0.70f, 0.65f, 0.90f)
+};
 
     static OcrRegion[] getOcrRegionsForSize(int width, int height) {
         return width >= height
