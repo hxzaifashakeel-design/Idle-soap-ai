@@ -340,7 +340,8 @@ pendingResizeHeight = 0;
 if (pendingWidth > 0 && pendingHeight > 0) {
     imageHandler.post(() ->
             resizeCapture(pendingWidth, pendingHeight));
-}
+     }
+    }      
         private void resizeCapture(int width, int height) {
 
     if (width <= 0
