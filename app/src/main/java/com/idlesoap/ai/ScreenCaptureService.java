@@ -111,14 +111,18 @@ public class ScreenCaptureService extends Service {
 };
 
     private MediaProjection projection;
-    private VirtualDisplay virtualDisplay;
-    private ImageReader imageReader;
-
+private volatile VirtualDisplay virtualDisplay;
+private ImageReader imageReader;
+    
     private HandlerThread handlerThread;
     private Handler imageHandler;
 
     private int screenWidth;
-    private int screenHeight;
+private int screenHeight;
+private int screenDensityDpi;
+
+private volatile int pendingResizeWidth;
+private volatile int pendingResizeHeight;
 
     private long lastSavedTime = 0L;
     private long lastOcrTime = 0L;
@@ -250,7 +254,7 @@ public class ScreenCaptureService extends Service {
         screenWidth = metrics.widthPixels;
         screenHeight = metrics.heightPixels;
 
-        int density = metrics.densityDpi;
+        screenDensityDpi = metrics.densityDpi;
 
         if (Build.VERSION.SDK_INT >= 30) {
 
@@ -286,26 +290,127 @@ public class ScreenCaptureService extends Service {
                 this::saveLatestFrame,
                 imageHandler);
 
-        projection.registerCallback(
-                new MediaProjection.Callback() {
+        
+    
+       projection.registerCallback(
+        new MediaProjection.Callback() {
 
-                    @Override
-                    public void onStop() {
-                        stopSelf();
-                    }
-                },
-                imageHandler);
+            @Override
+            public void onStop() {
+                stopSelf();
+            }
 
-        virtualDisplay = projection.createVirtualDisplay(
-                "IdleSoapAI-Capture",
-                screenWidth,
-                screenHeight,
-                density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.getSurface(),
-                null,
-                imageHandler);
+            @Override
+            public void onCapturedContentResize(
+                    int width,
+                    int height) {
+
+                if (width <= 0 || height <= 0) {
+                    return;
+                }
+
+                if (virtualDisplay == null) {
+                    pendingResizeWidth = width;
+                    pendingResizeHeight = height;
+                    return;
+                }
+
+                resizeCapture(width, height);
+            }
+        },
+        imageHandler);
+
+virtualDisplay = projection.createVirtualDisplay(
+        "IdleSoapAI-Capture",
+        screenWidth,
+        screenHeight,
+        screenDensityDpi,
+        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+        imageReader.getSurface(),
+        null,
+        imageHandler);
+
+// Apply a resize callback that arrived during display creation.
+int pendingWidth = pendingResizeWidth;
+int pendingHeight = pendingResizeHeight;
+
+pendingResizeWidth = 0;
+pendingResizeHeight = 0;
+
+if (pendingWidth > 0 && pendingHeight > 0) {
+    imageHandler.post(() ->
+            resizeCapture(pendingWidth, pendingHeight));
+}
+        private void resizeCapture(int width, int height) {
+
+    if (width <= 0
+            || height <= 0
+            || virtualDisplay == null
+            || imageHandler == null) {
+        return;
     }
+
+    if (width == screenWidth && height == screenHeight) {
+        return;
+    }
+
+    ImageReader replacementReader = null;
+
+    try {
+
+        replacementReader = ImageReader.newInstance(
+                width,
+                height,
+                PixelFormat.RGBA_8888,
+                2);
+
+        replacementReader.setOnImageAvailableListener(
+                this::saveLatestFrame,
+                imageHandler);
+
+        ImageReader previousReader = imageReader;
+
+        // Resize the virtual display first.
+        virtualDisplay.resize(
+                width,
+                height,
+                screenDensityDpi);
+
+        // Attach the correctly sized output surface.
+        virtualDisplay.setSurface(
+                replacementReader.getSurface());
+
+        imageReader = replacementReader;
+
+        screenWidth = width;
+        screenHeight = height;
+
+        lastSavedTime = 0L;
+        lastOcrTime = 0L;
+
+        if (previousReader != null) {
+            previousReader.close();
+        }
+
+        Log.i(
+                "IdleSoapAI",
+                "Capture resized to "
+                        + width + " x " + height);
+
+    } catch (Exception e) {
+
+        if (replacementReader != null
+                && replacementReader != imageReader) {
+            replacementReader.close();
+        }
+
+        Log.e(
+                "IdleSoapAI",
+                "Could not resize screen capture",
+                e);
+    }
+        }
+    
 
     private void saveLatestFrame(ImageReader reader) {
 
