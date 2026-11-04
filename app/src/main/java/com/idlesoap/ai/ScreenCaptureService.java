@@ -76,9 +76,8 @@ public class ScreenCaptureService extends Service {
         }
     }
 
-    // Normalized coordinates (0.0 to 1.0) relative to the captured frame.
-    // Keep these as the single source of truth for OCR and the visual overlay.
-    static final OcrRegion[] OCR_REGIONS = {
+    // Portrait coordinates are retained for the earlier tall game layout.
+    private static final OcrRegion[] PORTRAIT_OCR_REGIONS = {
             new OcrRegion("MONEY", 0.005f, 0.025f, 0.195f, 0.065f),
             new OcrRegion("EARNINGS", 0.015f, 0.066f, 0.19f, 0.095f),
             new OcrRegion("SOAP STATUS", 0.29f, 0.055f, 0.52f, 0.108f),
@@ -89,6 +88,32 @@ public class ScreenCaptureService extends Service {
             new OcrRegion("INCOME UPGRADE", 0.325f, 0.565f, 0.48f, 0.69f),
             new OcrRegion("SPEED UPGRADE", 0.505f, 0.565f, 0.66f, 0.69f)
     };
+
+    // First calibration for the wide split-screen layout.
+    // Verify these rectangles with the on-device overlay before treating them as final.
+    private static final OcrRegion[] LANDSCAPE_OCR_REGIONS = {
+            new OcrRegion("MONEY", 0.005f, 0.085f, 0.16f, 0.15f),
+            new OcrRegion("EARNINGS", 0.005f, 0.15f, 0.18f, 0.21f),
+            new OcrRegion("SOAP STATUS", 0.40f, 0.12f, 0.68f, 0.23f),
+            new OcrRegion("SOAP NAME", 0.43f, 0.22f, 0.58f, 0.29f),
+            new OcrRegion("BOOSTS", 0.005f, 0.22f, 0.15f, 0.62f),
+            new OcrRegion("CUTTING PROGRESS", 0.38f, 0.67f, 0.67f, 0.75f),
+            new OcrRegion("CUT UPGRADE", 0.35f, 0.74f, 0.45f, 0.90f),
+            new OcrRegion("INCOME UPGRADE", 0.45f, 0.74f, 0.55f, 0.90f),
+            new OcrRegion("SPEED UPGRADE", 0.55f, 0.74f, 0.65f, 0.90f)
+    };
+
+    static OcrRegion[] getOcrRegionsForSize(int width, int height) {
+        return width >= height
+                ? LANDSCAPE_OCR_REGIONS
+                : PORTRAIT_OCR_REGIONS;
+    }
+
+    static String getOcrLayoutName(int width, int height) {
+        return width >= height
+                ? "LANDSCAPE / SPLIT-SCREEN"
+                : "PORTRAIT";
+    }
 
     private MediaProjection projection;
     private volatile VirtualDisplay virtualDisplay;
@@ -443,11 +468,17 @@ public class ScreenCaptureService extends Service {
 
                 if (ocrFrame != null) {
                     lastOcrTime = now;
+
                     ocrInProgress = true;
+
+                    OcrRegion[] activeRegions = getOcrRegionsForSize(
+                            ocrFrame.getWidth(),
+                            ocrFrame.getHeight());
+
                     processNextRegion(
                             ocrFrame,
                             0,
-                            new String[OCR_REGIONS.length]);
+                            new String[activeRegions.length]);
                 }
             }
         } catch (Exception e) {
@@ -508,6 +539,7 @@ public class ScreenCaptureService extends Service {
         }
 
         final Bitmap bitmapToSave = previewBitmap;
+
         try {
             previewExecutor.execute(() -> {
                 File output = new File(getCacheDir(), "latest_screen.jpg");
@@ -519,9 +551,11 @@ public class ScreenCaptureService extends Service {
                                 Bitmap.CompressFormat.JPEG,
                                 PREVIEW_JPEG_QUALITY,
                                 stream);
+
                         if (!compressed) {
                             throw new IllegalStateException("Preview compression failed");
                         }
+
                         stream.flush();
                     }
 
@@ -529,6 +563,7 @@ public class ScreenCaptureService extends Service {
                         if (output.exists() && !output.delete()) {
                             throw new IllegalStateException("Could not replace preview file");
                         }
+
                         if (!temporary.renameTo(output)) {
                             throw new IllegalStateException("Could not publish preview file");
                         }
@@ -540,6 +575,7 @@ public class ScreenCaptureService extends Service {
                     if (!bitmapToSave.isRecycled()) {
                         bitmapToSave.recycle();
                     }
+
                     previewSavePending = false;
                 }
             });
@@ -547,6 +583,7 @@ public class ScreenCaptureService extends Service {
             if (!bitmapToSave.isRecycled()) {
                 bitmapToSave.recycle();
             }
+
             previewSavePending = false;
             Log.e("IdleSoapAI", "Preview worker unavailable", e);
         }
@@ -561,6 +598,7 @@ public class ScreenCaptureService extends Service {
         int callbackHeight = lastResizeCallbackHeight;
 
         String aspect = "unknown";
+
         if (height > 0) {
             aspect = String.format(
                     Locale.US,
@@ -582,7 +620,9 @@ public class ScreenCaptureService extends Service {
                 + "Aspect ratio (width/height): " + aspect + "\n"
                 + "Density: " + screenDensityDpi + " dpi\n"
                 + "Resize callback: " + callbackText + "\n"
-                + "OCR regions: " + OCR_REGIONS.length + "\n"
+                + "OCR layout: " + getOcrLayoutName(width, height) + "\n"
+                + "OCR regions: "
+                + getOcrRegionsForSize(width, height).length + "\n"
                 + "Preview: max side " + PREVIEW_MAX_SIDE
                 + " px, JPEG quality " + PREVIEW_JPEG_QUALITY + "\n"
                 + "Status: " + note + "\n";
@@ -603,6 +643,7 @@ public class ScreenCaptureService extends Service {
             if (output.exists()) {
                 output.delete();
             }
+
             if (!temporary.renameTo(output)) {
                 Log.e("IdleSoapAI", "Could not publish capture diagnostics");
                 temporary.delete();
@@ -614,15 +655,21 @@ public class ScreenCaptureService extends Service {
             Bitmap source,
             int regionIndex,
             String[] regionResults) {
-        if (regionIndex >= OCR_REGIONS.length) {
+
+        OcrRegion[] regions = getOcrRegionsForSize(
+                source.getWidth(),
+                source.getHeight());
+
+        if (regionIndex >= regions.length) {
             StringBuilder snapshot = new StringBuilder();
 
-            for (int i = 0; i < OCR_REGIONS.length; i++) {
+            for (int i = 0; i < regions.length; i++) {
                 snapshot.append("[")
-                        .append(OCR_REGIONS[i].name)
+                        .append(regions[i].name)
                         .append("]\n");
 
                 String value = regionResults[i];
+
                 if (value != null && !value.trim().isEmpty()) {
                     snapshot.append(value.trim()).append("\n");
                 } else {
@@ -636,10 +683,11 @@ public class ScreenCaptureService extends Service {
             if (!source.isRecycled()) {
                 source.recycle();
             }
+
             return;
         }
 
-        OcrRegion region = OCR_REGIONS[regionIndex];
+        OcrRegion region = regions[regionIndex];
         Bitmap rawCrop = null;
         Bitmap enlarged = null;
 
@@ -647,12 +695,15 @@ public class ScreenCaptureService extends Service {
             int left = Math.max(0, Math.min(
                     source.getWidth() - 1,
                     Math.round(source.getWidth() * region.left)));
+
             int top = Math.max(0, Math.min(
                     source.getHeight() - 1,
                     Math.round(source.getHeight() * region.top)));
+
             int right = Math.max(left + 1, Math.min(
                     source.getWidth(),
                     Math.round(source.getWidth() * region.right)));
+
             int bottom = Math.max(top + 1, Math.min(
                     source.getHeight(),
                     Math.round(source.getHeight() * region.bottom)));
@@ -663,6 +714,7 @@ public class ScreenCaptureService extends Service {
                     top,
                     right - left,
                     bottom - top);
+
             enlarged = Bitmap.createScaledBitmap(
                     rawCrop,
                     rawCrop.getWidth() * UPSCALE_FACTOR,
@@ -671,6 +723,7 @@ public class ScreenCaptureService extends Service {
 
             final Bitmap cropToRelease = rawCrop;
             final Bitmap enlargedToRelease = enlarged;
+
             InputImage input = InputImage.fromBitmap(enlarged, 0);
 
             textRecognizer.process(input)
@@ -686,21 +739,34 @@ public class ScreenCaptureService extends Service {
                                 && !enlargedToRelease.isRecycled()) {
                             enlargedToRelease.recycle();
                         }
+
                         if (!cropToRelease.isRecycled()) {
                             cropToRelease.recycle();
                         }
-                        processNextRegion(source, regionIndex + 1, regionResults);
+
+                        processNextRegion(
+                                source,
+                                regionIndex + 1,
+                                regionResults);
                     });
+
         } catch (Exception e) {
             Log.e("IdleSoapAI", "Could not process " + region.name, e);
+
             if (enlarged != null && !enlarged.isRecycled()) {
                 enlarged.recycle();
             }
+
             if (rawCrop != null && !rawCrop.isRecycled()) {
                 rawCrop.recycle();
             }
+
             regionResults[regionIndex] = "Recognition error";
-            processNextRegion(source, regionIndex + 1, regionResults);
+
+            processNextRegion(
+                    source,
+                    regionIndex + 1,
+                    regionResults);
         }
     }
 
@@ -710,8 +776,10 @@ public class ScreenCaptureService extends Service {
 
         try (FileOutputStream stream = new FileOutputStream(temporary)) {
             String value = recognizedText == null ? "" : recognizedText;
+
             stream.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             stream.flush();
+
         } catch (Exception e) {
             Log.e("IdleSoapAI", "Could not write OCR snapshot", e);
             return;
