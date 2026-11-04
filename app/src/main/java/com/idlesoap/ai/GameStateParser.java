@@ -11,10 +11,10 @@ public final class GameStateParser {
             Pattern.compile(
                     "(?i)^\\s*[₹$]?\\s*\\d+(?:[.,]\\d+)?\\s*[KMB]?\\s*$");
 
-    // Recognizes levels even when OCR puts other text on the same line.
+    // Includes common OCR mistakes such as Lul instead of Lvl.
     private static final Pattern LEVEL =
             Pattern.compile(
-                    "(?i)\\b(?:lvl|lvi|lvy|ly|lv1|level)\\s*(\\d{1,3})\\b");
+                    "(?i)\\b(?:lvl|lvi|lvy|lv1|lul|lui|lu1|ly|level)\\s*(\\d{1,3})\\b");
 
     private static final Pattern PERCENT =
             Pattern.compile("(\\d{1,3})\\s*%");
@@ -39,8 +39,11 @@ public final class GameStateParser {
         String soapNumber =
                 findSoapNumber(sections.get("SOAP STATUS"));
 
-        String soapPercent =
-                findPercent(sections.get("SOAP STATUS"));
+        String soapPercentSection = sections.get("SOAP PERCENT");
+
+        String soapPercent = soapPercentSection != null
+                ? findSoapPercent(soapPercentSection)
+                : findPercent(sections.get("SOAP STATUS"));
 
         String soapName =
                 firstUsefulLine(sections.get("SOAP NAME"));
@@ -49,7 +52,13 @@ public final class GameStateParser {
                 sections.get("PROGRESS LEVEL");
 
         String progressLevel = findLevel(progressLevelSection);
-        String levelUpProgress = findProgress(progressLevelSection);
+
+        boolean levelUpReady =
+                isLevelUpReady(sections.get("LEVEL UP BUTTON"));
+
+        String levelUpProgress = levelUpReady
+                ? "Ready to level up"
+                : findProgress(progressLevelSection);
 
         String cut = findUpgrade(sections.get("CUT UPGRADE"));
         String income = findUpgrade(sections.get("INCOME UPGRADE"));
@@ -226,6 +235,55 @@ public final class GameStateParser {
         }
 
         return "Not detected";
+    }
+
+    private static String findSoapPercent(String section) {
+
+        if (section == null) {
+            return "Not detected";
+        }
+
+        // Prefer a complete reading such as 55%.
+        Matcher percentMatcher = PERCENT.matcher(section);
+
+        while (percentMatcher.find()) {
+
+            int value =
+                    Integer.parseInt(percentMatcher.group(1));
+
+            if (value <= 100) {
+                return value + "%";
+            }
+        }
+
+        // The dedicated crop isolates the percentage display.
+        // Accept two or three digits if OCR misses the % symbol.
+        Matcher digitsMatcher = Pattern.compile(
+                "(?<!\\d)(\\d{2,3})(?!\\d)")
+                .matcher(section);
+
+        while (digitsMatcher.find()) {
+
+            int value =
+                    Integer.parseInt(digitsMatcher.group(1));
+
+            if (value <= 100) {
+                return value + "%";
+            }
+        }
+
+        return "Not detected";
+    }
+
+    private static boolean isLevelUpReady(String section) {
+
+        if (section == null) {
+            return false;
+        }
+
+        return Pattern.compile("(?i)level\\s*up")
+                .matcher(section)
+                .find();
     }
 
     private static String findProgress(String section) {
