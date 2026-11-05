@@ -61,6 +61,8 @@ public class MainActivity extends Activity {
 
     // AI state tracking
     private GameState previousGameState;
+    private final GameStrategyEngine strategyEngine =
+        new GameStrategyEngine();
 
     private String latestDecisionText =
             "Waiting for a readable game state...";
@@ -158,6 +160,7 @@ public class MainActivity extends Activity {
         Button startButton = new Button(this);
 
         startButton.setText("START SCREEN CAPTURE");
+        
 
         layout.addView(startButton);
 
@@ -486,6 +489,7 @@ public class MainActivity extends Activity {
 
             // Reset comparison history for a new capture session.
             previousGameState = null;
+            strategyEngine.reset();
 
             latestDecisionText =
                     "Waiting for the first game snapshot...";
@@ -717,17 +721,24 @@ public class MainActivity extends Activity {
                             latestRecognizedText);
 
             // Evaluate the current game state.
-            // Also compare earnings with the previous snapshot.
-            GameDecisionEngine.Decision decision =
-                    GameDecisionEngine.evaluate(
-                            currentGameState,
-                            previousGameState);
+GameDecisionEngine.Decision decision =
+        GameDecisionEngine.evaluate(
+                currentGameState,
+                previousGameState);
 
-            // Generate the new AI panel text.
-            latestDecisionText =
-                    formatAiDecision(
-                            currentGameState,
-                            decision);
+// Run the new strategy engine.
+GameStrategyEngine.Report strategyReport =
+        strategyEngine.evaluate(
+                currentGameState,
+                previousGameState);
+
+// Display both the decision and strategy reports.
+latestDecisionText =
+        formatAiDecision(
+                currentGameState,
+                decision)
+        + "\n\n"
+        + strategyReport.toDisplayText();
 
             // Remember this snapshot for the next comparison.
             previousGameState = currentGameState;
