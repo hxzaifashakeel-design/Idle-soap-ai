@@ -357,29 +357,5 @@ public final class GameStateParser {
 
     
 
-        StringBuilder result = new StringBuilder();
-
-        for (String line : section.split("\\R")) {
-
-            String value = line.trim();
-
-            if (value.isEmpty()
-                    || value.equalsIgnoreCase("Free")
-                    || value.equalsIgnoreCase("No text detected yet.")
-                    || value.equalsIgnoreCase("Recognition error")) {
-
-                continue;
-            }
-
-            if (result.length() > 0) {
-                result.append(", ");
-            }
-
-            result.append(value);
-        }
-
-        return result.length() == 0
-                ? "None detected"
-                : result.toString();
-    }
+        
 }
