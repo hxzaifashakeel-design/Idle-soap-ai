@@ -83,7 +83,7 @@ public class ScreenCaptureService extends Service {
         new OcrRegion("SOAP STATUS", 0.29f, 0.055f, 0.52f, 0.108f),
         new OcrRegion("SOAP PERCENT", 0.39f, 0.075f, 0.51f, 0.112f),
         new OcrRegion("SOAP NAME", 0.36f, 0.135f, 0.50f, 0.16f),
-        new OcrRegion("BOOSTS", 0.005f, 0.195f, 0.13f, 0.44f),
+        
         new OcrRegion("PROGRESS LEVEL", 0.24f, 0.51f, 0.56f, 0.565f),
         new OcrRegion("LEVEL UP BUTTON", 0.24f, 0.545f, 0.56f, 0.59f),
         new OcrRegion("CUT UPGRADE", 0.15f, 0.565f, 0.31f, 0.69f),
@@ -99,7 +99,7 @@ public class ScreenCaptureService extends Service {
         new OcrRegion("SOAP STATUS", 0.40f, 0.065f, 0.68f, 0.15f),
         new OcrRegion("SOAP PERCENT", 0.445f, 0.145f, 0.555f, 0.19f),
         new OcrRegion("SOAP NAME", 0.43f, 0.22f, 0.58f, 0.29f),
-        new OcrRegion("BOOSTS", 0.005f, 0.295f, 0.15f, 0.62f),
+        
         new OcrRegion("PROGRESS LEVEL", 0.38f, 0.62f, 0.67f, 0.705f),
         new OcrRegion("LEVEL UP BUTTON", 0.405f, 0.66f, 0.595f, 0.705f),
         new OcrRegion("CUT UPGRADE", 0.35f, 0.70f, 0.45f, 0.90f),
