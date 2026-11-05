@@ -832,31 +832,7 @@ latestDecisionText =
                 .append(state.getProgressDisplay())
                 .append("\n");
 
-        result.append("Auto-clicker label: ")
-                .append(state.autoClickerMentioned
-                        ? "Detected" : "Not detected")
-                .append("\n");
-
-        result.append("Free marker: ")
-                .append(state.freeMarkerSeen
-                        ? "Detected" : "Not detected")
-                .append("\n\n");
-
-        result.append("BOOSTS DETECTED\n");
-
-        if (state.boostEntries.isEmpty()) {
-
-            result.append("No boost entries detected.");
-
-        } else {
-
-            for (String boost : state.boostEntries) {
-
-                result.append("- ")
-                        .append(boost)
-                        .append("\n");
-            }
-        }
+        
 
         result.append("\nAI MODE: OBSERVATION AND DECISIONS");
 
