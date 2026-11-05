@@ -64,7 +64,7 @@ public final class GameStateParser {
         String income = findUpgrade(sections.get("INCOME UPGRADE"));
         String speed = findUpgrade(sections.get("SPEED UPGRADE"));
 
-        String boosts = cleanBoosts(sections.get("BOOSTS"));
+        
 
         StringBuilder result = new StringBuilder();
 
@@ -102,8 +102,7 @@ public final class GameStateParser {
         result.append("Speed: ")
                 .append(speed).append("\n\n");
 
-        result.append("FREE BOOSTS\n")
-                .append(boosts).append("\n\n");
+        
 
         result.append(
                 "Each value is read from its own screen region. ")
@@ -356,11 +355,7 @@ public final class GameStateParser {
         return "Unknown";
     }
 
-    private static String cleanBoosts(String section) {
-
-        if (section == null) {
-            return "None detected";
-        }
+    
 
         StringBuilder result = new StringBuilder();
 
