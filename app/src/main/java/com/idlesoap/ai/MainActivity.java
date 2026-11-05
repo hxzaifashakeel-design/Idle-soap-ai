@@ -43,19 +43,30 @@ public class MainActivity extends Activity {
     private TextView recognizedText;
     private TextView gameStateText;
     private TextView captureInfo;
+    private TextView aiDecisionText;
+
     private ImageView preview;
     private OcrRegionOverlay regionOverlay;
 
     private Bitmap currentBitmap;
+
     private boolean displayFrozen = false;
     private boolean showOcrRegions = false;
     private boolean previewDecodePending = false;
+
     private volatile boolean activityDestroyed = false;
 
     private String latestRecognizedText =
             "Waiting for screen recognition...";
 
-    private final Handler handler = new Handler(Looper.getMainLooper());
+    // AI state tracking
+    private GameState previousGameState;
+
+    private String latestDecisionText =
+            "Waiting for a readable game state...";
+
+    private final Handler handler =
+            new Handler(Looper.getMainLooper());
 
     private final ExecutorService previewDecodeExecutor =
             Executors.newSingleThreadExecutor();
@@ -66,8 +77,10 @@ public class MainActivity extends Activity {
     private long lastCaptureInfoModified = -1L;
 
     private final Runnable previewUpdater = new Runnable() {
+
         @Override
         public void run() {
+
             if (activityDestroyed) {
                 return;
             }
@@ -82,55 +95,104 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
         super.onCreate(savedInstanceState);
 
         LinearLayout layout = new LinearLayout(this);
+
         layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(dp(20), dp(24), dp(20), dp(24));
+        layout.setPadding(
+                dp(20),
+                dp(24),
+                dp(20),
+                dp(24));
+
         layout.setBackgroundColor(0xFF141823);
 
+        // TITLE
+
         TextView title = new TextView(this);
+
         title.setText("IDLE SOAP AI");
         title.setTextSize(28);
         title.setTextColor(Color.WHITE);
         title.setGravity(Gravity.CENTER);
+
         layout.addView(title);
 
         TextView subtitle = new TextView(this);
+
         subtitle.setText("SCREEN RECOGNITION - PHASE 3");
         subtitle.setTextSize(15);
         subtitle.setTextColor(0xFFBBBBBB);
+
         subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(10), 0, dp(18));
+
+        subtitle.setPadding(
+                0,
+                dp(10),
+                0,
+                dp(18));
+
         layout.addView(subtitle);
 
+        // STATUS
+
         status = new TextView(this);
+
         status.setText("Screen capture is not active.");
         status.setTextSize(16);
         status.setTextColor(Color.WHITE);
         status.setGravity(Gravity.CENTER);
-        status.setPadding(0, dp(12), 0, dp(16));
+
+        status.setPadding(
+                0,
+                dp(12),
+                0,
+                dp(16));
+
         layout.addView(status);
 
+        // START BUTTON
+
         Button startButton = new Button(this);
+
         startButton.setText("START SCREEN CAPTURE");
+
         layout.addView(startButton);
 
+        // STOP BUTTON
+
         Button stopButton = new Button(this);
+
         stopButton.setText("STOP SCREEN CAPTURE");
+
         layout.addView(stopButton);
 
+        // PREVIEW TITLE
+
         TextView previewTitle = new TextView(this);
+
         previewTitle.setText("LATEST CAPTURED FRAME");
         previewTitle.setTextColor(Color.WHITE);
         previewTitle.setTextSize(17);
-        previewTitle.setPadding(0, dp(24), 0, dp(10));
+
+        previewTitle.setPadding(
+                0,
+                dp(24),
+                0,
+                dp(10));
+
         layout.addView(previewTitle);
 
+        // PREVIEW FRAME
+
         FrameLayout previewFrame = new FrameLayout(this);
+
         previewFrame.setBackgroundColor(0xFF252B38);
 
         preview = new ImageView(this);
+
         preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
         preview.setBackgroundColor(0xFF252B38);
 
@@ -140,7 +202,10 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // OCR REGION OVERLAY
+
         regionOverlay = new OcrRegionOverlay(this);
+
         regionOverlay.setVisibility(View.GONE);
         regionOverlay.setClickable(false);
         regionOverlay.setFocusable(false);
@@ -157,15 +222,22 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         dp(260)));
 
+        // OCR REGION BUTTON
+
         Button regionToggleButton = new Button(this);
+
         regionToggleButton.setText("SHOW OCR REGIONS");
+
         layout.addView(regionToggleButton);
 
         regionToggleButton.setOnClickListener(v -> {
+
             showOcrRegions = !showOcrRegions;
 
             regionOverlay.setVisibility(
-                    showOcrRegions ? View.VISIBLE : View.GONE);
+                    showOcrRegions
+                            ? View.VISIBLE
+                            : View.GONE);
 
             regionToggleButton.setText(
                     showOcrRegions
@@ -175,11 +247,22 @@ public class MainActivity extends Activity {
             regionOverlay.invalidate();
         });
 
+        // CAPTURE DIAGNOSTICS
+
         captureInfo = new TextView(this);
-        captureInfo.setText("Waiting for capture diagnostics...");
+
+        captureInfo.setText(
+                "Waiting for capture diagnostics...");
+
         captureInfo.setTextColor(Color.WHITE);
         captureInfo.setTextSize(13);
-        captureInfo.setPadding(dp(12), dp(10), dp(12), dp(10));
+
+        captureInfo.setPadding(
+                dp(12),
+                dp(10),
+                dp(12),
+                dp(10));
+
         captureInfo.setBackgroundColor(0xFF252B38);
 
         layout.addView(
@@ -188,19 +271,39 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // RAW OCR TITLE
+
         TextView ocrTitle = new TextView(this);
+
         ocrTitle.setText("WHAT THE AI CAN READ");
         ocrTitle.setTextColor(Color.WHITE);
         ocrTitle.setTextSize(17);
-        ocrTitle.setPadding(0, dp(24), 0, dp(10));
+
+        ocrTitle.setPadding(
+                0,
+                dp(24),
+                0,
+                dp(10));
+
         layout.addView(ocrTitle);
 
+        // RAW OCR TEXT
+
         recognizedText = new TextView(this);
-        recognizedText.setText("Waiting for screen recognition...");
+
+        recognizedText.setText(
+                "Waiting for screen recognition...");
+
         recognizedText.setTextColor(Color.WHITE);
         recognizedText.setTextSize(14);
         recognizedText.setTextIsSelectable(true);
-        recognizedText.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        recognizedText.setPadding(
+                dp(12),
+                dp(12),
+                dp(12),
+                dp(12));
+
         recognizedText.setBackgroundColor(0xFF252B38);
 
         layout.addView(
@@ -209,18 +312,38 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // GAME STATE TITLE
+
         TextView gameStateTitle = new TextView(this);
+
         gameStateTitle.setText("DETECTED GAME STATE");
         gameStateTitle.setTextColor(Color.WHITE);
         gameStateTitle.setTextSize(18);
-        gameStateTitle.setPadding(0, dp(24), 0, dp(10));
+
+        gameStateTitle.setPadding(
+                0,
+                dp(24),
+                0,
+                dp(10));
+
         layout.addView(gameStateTitle);
 
+        // GAME STATE TEXT
+
         gameStateText = new TextView(this);
-        gameStateText.setText("Waiting for game information...");
+
+        gameStateText.setText(
+                "Waiting for game information...");
+
         gameStateText.setTextColor(Color.WHITE);
         gameStateText.setTextSize(15);
-        gameStateText.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        gameStateText.setPadding(
+                dp(12),
+                dp(12),
+                dp(12),
+                dp(12));
+
         gameStateText.setBackgroundColor(0xFF252B38);
 
         layout.addView(
@@ -229,13 +352,59 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // ==================================
+        // NEW AI BRAIN PANEL
+        // ==================================
+
+        TextView aiTitle = new TextView(this);
+
+        aiTitle.setText("AI BRAIN - DECISION ENGINE");
+        aiTitle.setTextColor(0xFF80D8FF);
+        aiTitle.setTextSize(19);
+
+        aiTitle.setPadding(
+                0,
+                dp(24),
+                0,
+                dp(10));
+
+        layout.addView(aiTitle);
+
+        aiDecisionText = new TextView(this);
+
+        aiDecisionText.setText(latestDecisionText);
+        aiDecisionText.setTextColor(Color.WHITE);
+        aiDecisionText.setTextSize(14);
+        aiDecisionText.setTextIsSelectable(true);
+
+        aiDecisionText.setPadding(
+                dp(12),
+                dp(12),
+                dp(12),
+                dp(12));
+
+        aiDecisionText.setBackgroundColor(0xFF202C3D);
+
+        layout.addView(
+                aiDecisionText,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // ==================================
+        // FREEZE AND COPY CONTROLS
+        // ==================================
+
         LinearLayout controls = new LinearLayout(this);
+
         controls.setOrientation(LinearLayout.HORIZONTAL);
 
         Button freezeButton = new Button(this);
+
         freezeButton.setText("FREEZE TEXT");
 
         Button copyButton = new Button(this);
+
         copyButton.setText("COPY TEXT");
 
         LinearLayout.LayoutParams buttonParams =
@@ -246,34 +415,55 @@ public class MainActivity extends Activity {
 
         controls.addView(freezeButton, buttonParams);
         controls.addView(copyButton, buttonParams);
+
         layout.addView(controls);
 
+        // FREEZE BUTTON
+
         freezeButton.setOnClickListener(v -> {
+
             displayFrozen = !displayFrozen;
 
             if (displayFrozen) {
+
                 freezeButton.setText("RESUME LIVE");
-                status.setText("Display frozen. OCR continues running.");
+
+                status.setText(
+                        "Display frozen. OCR continues running.");
+
             } else {
+
                 freezeButton.setText("FREEZE TEXT");
 
-                recognizedText.setText(latestRecognizedText);
+                recognizedText.setText(
+                        latestRecognizedText);
 
                 gameStateText.setText(
-                        GameStateParser.createSummary(latestRecognizedText));
+                        GameStateParser.createSummary(
+                                latestRecognizedText));
 
-                status.setText("Live recognition resumed.");
+                aiDecisionText.setText(
+                        latestDecisionText);
+
+                status.setText(
+                        "Live recognition resumed.");
             }
         });
 
+        // COPY BUTTON
+
         copyButton.setOnClickListener(v -> {
+
             String text = recognizedText.getText().toString();
 
             ClipboardManager clipboard =
-                    (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    (ClipboardManager) getSystemService(
+                            CLIPBOARD_SERVICE);
 
             clipboard.setPrimaryClip(
-                    ClipData.newPlainText("Idle Soap AI OCR", text));
+                    ClipData.newPlainText(
+                            "Idle Soap AI OCR",
+                            text));
 
             Toast.makeText(
                     this,
@@ -281,32 +471,54 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_SHORT).show();
         });
 
+        // START CAPTURE
+
         startButton.setOnClickListener(v -> {
-            File oldOcr = new File(getCacheDir(), "latest_ocr.txt");
+
+            File oldOcr = new File(
+                    getCacheDir(),
+                    "latest_ocr.txt");
+
             oldOcr.delete();
 
             lastOcrModified = -1L;
             lastCaptureInfoModified = -1L;
 
-            status.setText("Waiting for Android permission...");
+            // Reset comparison history for a new capture session.
+            previousGameState = null;
+
+            latestDecisionText =
+                    "Waiting for the first game snapshot...";
+
+            if (aiDecisionText != null) {
+                aiDecisionText.setText(latestDecisionText);
+            }
+
+            status.setText(
+                    "Waiting for Android permission...");
 
             MediaProjectionManager manager =
                     (MediaProjectionManager) getSystemService(
                             Context.MEDIA_PROJECTION_SERVICE);
 
-            Intent captureIntent = manager.createScreenCaptureIntent();
+            Intent captureIntent =
+                    manager.createScreenCaptureIntent();
 
             startActivityForResult(
                     captureIntent,
                     SCREEN_CAPTURE_REQUEST);
         });
 
+        // STOP CAPTURE
+
         stopButton.setOnClickListener(v -> {
+
             Intent stopIntent = new Intent(
                     this,
                     ScreenCaptureService.class);
 
-            stopIntent.setAction(ScreenCaptureService.ACTION_STOP);
+            stopIntent.setAction(
+                    ScreenCaptureService.ACTION_STOP);
 
             stopService(stopIntent);
 
@@ -314,14 +526,23 @@ public class MainActivity extends Activity {
                     "Screen capture stopped. Last frame is retained.");
         });
 
+        // SCROLL VIEW
+
         ScrollView scrollView = new ScrollView(this);
+
         scrollView.addView(layout);
+
         setContentView(scrollView);
 
         handler.post(previewUpdater);
     }
 
+    // ==================================
+    // PREVIEW UPDATER
+    // ==================================
+
     private void updateScreenPreview() {
+
         if (activityDestroyed || previewDecodePending) {
             return;
         }
@@ -345,14 +566,19 @@ public class MainActivity extends Activity {
         previewDecodePending = true;
 
         try {
+
             previewDecodeExecutor.execute(() -> {
-                Bitmap decodedBitmap = BitmapFactory.decodeFile(
-                        file.getAbsolutePath());
+
+                Bitmap decodedBitmap =
+                        BitmapFactory.decodeFile(
+                                file.getAbsolutePath());
 
                 boolean posted = handler.post(() -> {
+
                     previewDecodePending = false;
 
                     if (activityDestroyed) {
+
                         if (decodedBitmap != null
                                 && !decodedBitmap.isRecycled()) {
                             decodedBitmap.recycle();
@@ -362,9 +588,11 @@ public class MainActivity extends Activity {
                     }
 
                     if (decodedBitmap != null) {
+
                         Bitmap oldBitmap = currentBitmap;
 
                         currentBitmap = decodedBitmap;
+
                         preview.setImageBitmap(decodedBitmap);
 
                         regionOverlay.setSourceSize(
@@ -384,17 +612,26 @@ public class MainActivity extends Activity {
                 if (!posted
                         && decodedBitmap != null
                         && !decodedBitmap.isRecycled()) {
+
                     decodedBitmap.recycle();
                 }
             });
 
         } catch (RuntimeException e) {
+
             previewDecodePending = false;
-            status.setText("Preview error: " + e.getMessage());
+
+            status.setText(
+                    "Preview error: " + e.getMessage());
         }
     }
 
+    // ==================================
+    // CAPTURE DIAGNOSTICS
+    // ==================================
+
     private void updateCaptureDiagnostics() {
+
         File file = new File(
                 getCacheDir(),
                 "latest_capture_info.txt");
@@ -430,13 +667,19 @@ public class MainActivity extends Activity {
             lastCaptureInfoModified = modified;
 
         } catch (Exception e) {
+
             captureInfo.setText(
                     "Could not read capture diagnostics: "
                             + e.getMessage());
         }
     }
 
+    // ==================================
+    // OCR AND AI UPDATE
+    // ==================================
+
     private void updateRecognizedText() {
+
         File file = new File(
                 getCacheDir(),
                 "latest_ocr.txt");
@@ -468,25 +711,165 @@ public class MainActivity extends Activity {
                     ? "No text detected yet."
                     : result.toString();
 
+            // Convert the current OCR result into structured game data.
+            GameState currentGameState =
+                    GameState.fromRawOcr(
+                            latestRecognizedText);
+
+            // Evaluate the current game state.
+            // Also compare earnings with the previous snapshot.
+            GameDecisionEngine.Decision decision =
+                    GameDecisionEngine.evaluate(
+                            currentGameState,
+                            previousGameState);
+
+            // Generate the new AI panel text.
+            latestDecisionText =
+                    formatAiDecision(
+                            currentGameState,
+                            decision);
+
+            // Remember this snapshot for the next comparison.
+            previousGameState = currentGameState;
+
             if (!displayFrozen) {
-                recognizedText.setText(latestRecognizedText);
+
+                recognizedText.setText(
+                        latestRecognizedText);
 
                 gameStateText.setText(
-                        GameStateParser.createSummary(latestRecognizedText));
+                        GameStateParser.createSummary(
+                                latestRecognizedText));
+
+                aiDecisionText.setText(
+                        latestDecisionText);
             }
 
             lastOcrModified = modified;
 
         } catch (Exception e) {
+
             status.setText(
-                    "Could not read OCR result: " + e.getMessage());
+                    "Could not read OCR result: "
+                            + e.getMessage());
         }
     }
 
-    private int dp(int value) {
-        return (int) (
-                value * getResources().getDisplayMetrics().density + 0.5f);
+    // ==================================
+    // AI DECISION PANEL FORMATTER
+    // ==================================
+
+    private String formatAiDecision(
+            GameState state,
+            GameDecisionEngine.Decision decision) {
+
+        StringBuilder result = new StringBuilder();
+
+        result.append("CURRENT AI DECISION\n\n");
+
+        result.append(decision.title)
+                .append("\n\n");
+
+        result.append("Action: ")
+                .append(decision.action)
+                .append("\n");
+
+        result.append("Priority: ")
+                .append(decision.priority)
+                .append("\n");
+
+        result.append("Earnings trend: ")
+                .append(decision.earningsTrend)
+                .append("\n\n");
+
+        result.append("WHY THE AI CHOSE THIS\n")
+                .append(decision.explanation)
+                .append("\n\n");
+
+        result.append("NEXT REQUIREMENT\n")
+                .append(decision.nextRequirement)
+                .append("\n\n");
+
+        result.append("GAME SNAPSHOT\n");
+
+        result.append("Money: ")
+                .append(state.moneyDisplay == null
+                        ? "Unknown" : state.moneyDisplay)
+                .append("\n");
+
+        result.append("Earnings: ")
+                .append(state.earningsDisplay == null
+                        ? "Unknown" : state.earningsDisplay)
+                .append("\n");
+
+        result.append("Soap: ")
+                .append(state.soapName == null
+                        ? "Unknown" : state.soapName)
+                .append("\n");
+
+        result.append("Soap completion: ")
+                .append(state.soapPercent == null
+                        ? "Unknown" : state.soapPercent + "%")
+                .append("\n");
+
+        result.append("Progress level: ")
+                .append(state.progressLevel == null
+                        ? "Unknown" : state.progressLevel)
+                .append("\n");
+
+        result.append("Progress: ")
+                .append(state.getProgressDisplay())
+                .append("\n");
+
+        result.append("Auto-clicker label: ")
+                .append(state.autoClickerMentioned
+                        ? "Detected" : "Not detected")
+                .append("\n");
+
+        result.append("Free marker: ")
+                .append(state.freeMarkerSeen
+                        ? "Detected" : "Not detected")
+                .append("\n\n");
+
+        result.append("BOOSTS DETECTED\n");
+
+        if (state.boostEntries.isEmpty()) {
+
+            result.append("No boost entries detected.");
+
+        } else {
+
+            for (String boost : state.boostEntries) {
+
+                result.append("- ")
+                        .append(boost)
+                        .append("\n");
+            }
+        }
+
+        result.append("\nAI MODE: OBSERVATION AND DECISIONS");
+
+        result.append(
+                "\nNo screen actions are being performed.");
+
+        return result.toString();
     }
+
+    // ==================================
+    // DP HELPER
+    // ==================================
+
+    private int dp(int value) {
+
+        return (int) (
+                value * getResources()
+                        .getDisplayMetrics()
+                        .density + 0.5f);
+    }
+
+    // ==================================
+    // SCREEN CAPTURE PERMISSION
+    // ==================================
 
     @Override
     protected void onActivityResult(
@@ -494,9 +877,13 @@ public class MainActivity extends Activity {
             int resultCode,
             Intent data) {
 
-        super.onActivityResult(requestCode, resultCode, data);
+        super.onActivityResult(
+                requestCode,
+                resultCode,
+                data);
 
         if (requestCode == SCREEN_CAPTURE_REQUEST) {
+
             if (resultCode == RESULT_OK && data != null) {
 
                 Intent serviceIntent = new Intent(
@@ -515,9 +902,13 @@ public class MainActivity extends Activity {
                         data);
 
                 try {
+
                     if (Build.VERSION.SDK_INT >= 26) {
+
                         startForegroundService(serviceIntent);
+
                     } else {
+
                         startService(serviceIntent);
                     }
 
@@ -528,26 +919,36 @@ public class MainActivity extends Activity {
                     handler.post(previewUpdater);
 
                 } catch (Exception e) {
+
                     status.setText(
-                            "Could not start capture: " + e.getMessage());
+                            "Could not start capture: "
+                                    + e.getMessage());
                 }
 
             } else {
+
                 status.setText(
                         "Screen capture permission was not granted.");
             }
         }
     }
 
+    // ==================================
+    // CLEANUP
+    // ==================================
+
     @Override
     protected void onDestroy() {
+
         activityDestroyed = true;
 
         handler.removeCallbacks(previewUpdater);
+
         previewDecodeExecutor.shutdownNow();
 
         if (currentBitmap != null
                 && !currentBitmap.isRecycled()) {
+
             currentBitmap.recycle();
             currentBitmap = null;
         }
@@ -555,8 +956,12 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Draws normalized OCR regions over the same FIT_CENTER image content. */
-    private static final class OcrRegionOverlay extends View {
+    // ==================================
+    // OCR REGION OVERLAY
+    // ==================================
+
+    private static final class OcrRegionOverlay
+            extends View {
 
         private final Paint boxPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -568,6 +973,7 @@ public class MainActivity extends Activity {
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
         private final int[] colors = {
+
                 Color.rgb(255, 70, 70),
                 Color.rgb(255, 170, 40),
                 Color.rgb(80, 220, 255),
@@ -585,36 +991,54 @@ public class MainActivity extends Activity {
         private final float density;
 
         OcrRegionOverlay(Context context) {
+
             super(context);
 
-            density = getResources().getDisplayMetrics().density;
+            density = getResources()
+                    .getDisplayMetrics()
+                    .density;
 
             boxPaint.setStyle(Paint.Style.STROKE);
-            boxPaint.setStrokeWidth(2.5f * density);
 
-            labelBackgroundPaint.setStyle(Paint.Style.FILL);
-            labelBackgroundPaint.setColor(0xCC101010);
+            boxPaint.setStrokeWidth(
+                    2.5f * density);
 
-            labelTextPaint.setStyle(Paint.Style.FILL);
-            labelTextPaint.setColor(Color.WHITE);
-            labelTextPaint.setTextSize(10f * density);
+            labelBackgroundPaint.setStyle(
+                    Paint.Style.FILL);
+
+            labelBackgroundPaint.setColor(
+                    0xCC101010);
+
+            labelTextPaint.setStyle(
+                    Paint.Style.FILL);
+
+            labelTextPaint.setColor(
+                    Color.WHITE);
+
+            labelTextPaint.setTextSize(
+                    10f * density);
+
             labelTextPaint.setFakeBoldText(true);
         }
 
         void setSourceSize(int width, int height) {
+
             sourceWidth = width;
             sourceHeight = height;
+
             invalidate();
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
+
             super.onDraw(canvas);
 
             if (sourceWidth <= 0
                     || sourceHeight <= 0
                     || getWidth() <= 0
                     || getHeight() <= 0) {
+
                 return;
             }
 
@@ -625,24 +1049,36 @@ public class MainActivity extends Activity {
             float drawnWidth = sourceWidth * scale;
             float drawnHeight = sourceHeight * scale;
 
-            float offsetX = (getWidth() - drawnWidth) / 2f;
-            float offsetY = (getHeight() - drawnHeight) / 2f;
+            float offsetX =
+                    (getWidth() - drawnWidth) / 2f;
 
-            // Select the same layout used by ScreenCaptureService OCR.
+            float offsetY =
+                    (getHeight() - drawnHeight) / 2f;
+
             ScreenCaptureService.OcrRegion[] regions =
                     ScreenCaptureService.getOcrRegionsForSize(
                             sourceWidth,
                             sourceHeight);
 
             for (int i = 0; i < regions.length; i++) {
-                ScreenCaptureService.OcrRegion region = regions[i];
 
-                float left = offsetX + region.left * drawnWidth;
-                float top = offsetY + region.top * drawnHeight;
-                float right = offsetX + region.right * drawnWidth;
-                float bottom = offsetY + region.bottom * drawnHeight;
+                ScreenCaptureService.OcrRegion region =
+                        regions[i];
 
-                boxPaint.setColor(colors[i % colors.length]);
+                float left =
+                        offsetX + region.left * drawnWidth;
+
+                float top =
+                        offsetY + region.top * drawnHeight;
+
+                float right =
+                        offsetX + region.right * drawnWidth;
+
+                float bottom =
+                        offsetY + region.bottom * drawnHeight;
+
+                boxPaint.setColor(
+                        colors[i % colors.length]);
 
                 RectF rectangle = new RectF(
                         left,
@@ -650,12 +1086,17 @@ public class MainActivity extends Activity {
                         right,
                         bottom);
 
-                canvas.drawRect(rectangle, boxPaint);
+                canvas.drawRect(
+                        rectangle,
+                        boxPaint);
 
                 String label = region.name;
 
-                float horizontalPadding = 4f * density;
-                float labelHeight = 15f * density;
+                float horizontalPadding =
+                        4f * density;
+
+                float labelHeight =
+                        15f * density;
 
                 float labelWidth =
                         labelTextPaint.measureText(label)
@@ -665,9 +1106,11 @@ public class MainActivity extends Activity {
                         offsetY,
                         top - labelHeight);
 
-                float labelBottom = labelTop + labelHeight;
+                float labelBottom =
+                        labelTop + labelHeight;
 
-                labelBackgroundPaint.setColor(0xCC101010);
+                labelBackgroundPaint.setColor(
+                        0xCC101010);
 
                 canvas.drawRect(
                         left,
@@ -676,7 +1119,8 @@ public class MainActivity extends Activity {
                         labelBottom,
                         labelBackgroundPaint);
 
-                labelTextPaint.setColor(colors[i % colors.length]);
+                labelTextPaint.setColor(
+                        colors[i % colors.length]);
 
                 canvas.drawText(
                         label,
